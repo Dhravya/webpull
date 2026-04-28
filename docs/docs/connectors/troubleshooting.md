@@ -1,0 +1,244 @@
+---
+title: "Connector Troubleshooting"
+url: "https://supermemory.ai/docs/connectors/troubleshooting"
+---
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://supermemory.ai/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Connector Troubleshooting
+
+> Diagnose and resolve common issues with Google Drive, Gmail, Notion, and OneDrive connectors
+
+Quick guide to resolve common connector issues with authentication, syncing, and permissions.
+
+## Quick Health Check
+
+Check if your connectors are working properly:
+
+<CodeGroup>
+  ```typescript TypeScript theme={null}
+  const connections = await client.connections.list({
+    containerTags: ['user-123']
+  });
+
+  connections.forEach(conn => {
+    console.log(`${conn.provider}: ${conn.email} - Connected ${conn.createdAt}`);
+  });
+
+  // Check for stuck documents
+  const documents = await client.connections.listDocuments('notion', {
+    containerTags: ['user-123']
+  });
+
+  const failed = documents.filter(doc => doc.status === 'failed');
+  if (failed.length > 0) {
+    console.log(`⚠️ ${failed.length} documents failed to sync`);
+  }
+  ```
+
+  ```python Python theme={null}
+  connections = client.connections.list(container_tags=['user-123'])
+
+  for conn in connections:
+      print(f"{conn.provider}: {conn.email} - Connected {conn.created_at}")
+
+  # Check for stuck documents
+  documents = client.connections.list_documents(
+      'notion',
+      container_tags=['user-123']
+  )
+
+  failed = [doc for doc in documents if doc.status == 'failed']
+  if failed:
+      print(f"⚠️ {len(failed)} documents failed to sync")
+  ```
+
+  ```bash cURL theme={null}
+  # List all connections
+  curl -X POST "https://api.supermemory.ai/v3/connections/list" \
+    -H "Authorization: Bearer $SUPERMEMORY_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"containerTags": ["user-123"]}'
+
+  # Check document status
+  curl -X POST "https://api.supermemory.ai/v3/documents/list" \
+    -H "Authorization: Bearer $SUPERMEMORY_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"containerTags": ["user-123"], "source": "notion"}'
+  ```
+</CodeGroup>
+
+## Common Issues
+
+### OAuth Callback Fails
+
+**Problem:** "Invalid redirect URI" error after user grants permissions
+
+**Solution:** Ensure your redirect URL matches EXACTLY what's configured in your OAuth app:
+
+```typescript theme={null}
+// correct - exact match with OAuth app settings
+const connection = await client.connections.create('notion', {
+  redirectUrl: 'https://yourapp.com/auth/notion/callback',
+  containerTags: ['user-123']
+});
+
+// Wrong - URL doesn't match
+// redirectUrl: 'https://yourapp.com/callback'
+```
+
+**Prevention:**
+
+* Use HTTPS for production URLs
+* Copy the exact URL from your OAuth app settings
+* Test the flow in development first
+
+### Documents Not Syncing
+
+**Problem:** Documents stuck in "queued" or "extracting" status for over 30 minutes
+
+**Solution:** Trigger a manual sync:
+
+```typescript theme={null}
+// Force sync for stuck documents
+await client.connections.import('notion', {
+  containerTags: ['user-123']
+});
+```
+
+If documents consistently fail:
+
+* Check if files are over 50MB (may timeout)
+* Verify you have permission to access the documents
+* Ensure the document type is supported
+
+### Permission Denied Errors
+
+**Problem:** Some documents show "permission denied" or aren't syncing
+
+**Solution:** Re-authenticate with proper permissions:
+
+```typescript theme={null}
+// Delete and recreate connection
+await client.connections.deleteByProvider('google-drive', {
+  containerTags: ['user-123']
+});
+
+const newConnection = await client.connections.create('google-drive', {
+  redirectUrl: 'https://yourapp.com/callback',
+  containerTags: ['user-123']
+});
+
+// User must re-authenticate
+window.location.href = newConnection.authLink;
+```
+
+### Sync Takes Too Long
+
+**Problem:** Hundreds of documents taking hours to sync
+
+**Solution:** Set reasonable document limits:
+
+```typescript theme={null}
+const connection = await client.connections.create('onedrive', {
+  redirectUrl: 'https://yourapp.com/callback',
+  containerTags: ['user-123'],
+  documentLimit: 500  // Start with fewer documents
+});
+```
+
+## Provider-Specific Issues
+
+### Google Drive
+
+**Shared Drive Issues**
+
+Shared drives require special permissions. Make sure:
+
+* User has access to the shared drive
+* OAuth app has drive.readonly scope
+* User is a member of the shared drive
+
+### Notion
+
+**Database Not Syncing**
+
+Notion databases need explicit permission. If databases aren't syncing:
+
+1. Go to Notion workspace settings
+2. Find your integration under "Connections"
+3. Click on the integration
+4. Select specific pages/databases to share
+5. Re-sync after granting access
+
+**Workspace Access**
+
+For full workspace access, a workspace admin must:
+
+1. Approve the integration
+2. Grant access to all pages
+3. Enable "Read content" permission
+
+### OneDrive
+
+**Business vs Personal Accounts**
+
+Business accounts may have additional restrictions:
+
+* Admin consent might be required
+* Some SharePoint sites may be restricted
+* Compliance policies may block certain files
+
+### Gmail
+
+**Real-time Sync Not Working**
+
+If emails aren't syncing in real-time but scheduled/manual sync works:
+
+1. Real-time sync uses Google Cloud Pub/Sub webhooks
+2. Watch subscriptions expire after 7 days (supermemory auto-renews)
+3. Only INBOX label triggers real-time updates
+4. Trigger a manual sync to verify the connection is healthy:
+
+```typescript theme={null}
+await client.connections.import('gmail', {
+  containerTags: ['user-123']
+});
+```
+
+**Missing Refresh Token**
+
+If Gmail stops syncing after initial setup:
+
+1. The user may have revoked app access in Google Account settings
+2. Delete and recreate the connection
+3. Ensure user completes full OAuth consent flow
+
+```typescript theme={null}
+// Re-authenticate to get fresh tokens
+await client.connections.deleteByProvider('gmail', {
+  containerTags: ['user-123']
+});
+
+const newConnection = await client.connections.create('gmail', {
+  redirectUrl: 'https://yourapp.com/callback',
+  containerTags: ['user-123']
+});
+```
+
+**Scale Plan Required Error**
+
+Gmail connector requires Scale Plan or Enterprise Plan. If you see access errors:
+
+* Verify your organization has the required plan
+* Contact support to upgrade your plan
+
+## Best Practices
+
+1. **Set reasonable document limits** - Start with 500-1000 documents
+2. **Use descriptive container tags** - Makes debugging easier
+3. **Monitor failed documents** - Check weekly for sync issues
+4. **Handle rate limits gracefully** - Implement exponential backoff
+5. **Test OAuth in development** - Ensure redirect URLs work before production

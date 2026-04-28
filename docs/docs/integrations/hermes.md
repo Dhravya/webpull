@@ -1,0 +1,155 @@
+---
+title: "Hermes"
+url: "https://supermemory.ai/docs/integrations/hermes"
+---
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://supermemory.ai/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Hermes
+
+> Hermes Supermemory Plugin — semantic memory, profiles, and search across Telegram, Discord, Slack, CLI, and more
+
+[Hermes agent](https://github.com/NousResearch/hermes-agent) ships a native **supermemory** memory provider: semantic long-term memory, profile recall, search, explicit memory tools, and session-aware ingest — not a bolt-on script the model might skip. Hermes runs across Telegram, Discord, Slack, WhatsApp, Signal, and the CLI from one gateway.
+
+Hermes also includes built-in **`MEMORY.md`** and **`USER.md`**. supermemory adds **structure and isolation** (profile-scoped and optional multi-container tags) plus retrieval that goes beyond a single flat file.
+
+## Get Your API Key
+
+Create a supermemory API key from the [app with plugins deep link](https://app.supermemory.ai/?plugins=true) (or the [API Keys](https://console.supermemory.ai/keys) page in the console). During `hermes memory setup` you can paste it when prompted, or persist it in your environment:
+
+## Install the memory provider
+
+```bash theme={null}
+pip install supermemory
+```
+
+```bash theme={null}
+hermes memory setup
+```
+
+Select **supermemory** when prompted and paste your API key.
+
+Or set the provider and key manually:
+
+```bash theme={null}
+hermes config set memory.provider supermemory
+echo 'SUPERMEMORY_API_KEY=sm_...' >> ~/.hermes/.env
+```
+
+(Adjust the path if your Hermes home directory differs.)
+
+## How It Works
+
+Once configured, the provider runs through Hermes’s normal memory lifecycle:
+
+* **Prefetch** — Relevant memory context can be loaded before each turn.
+* **Turn capture** — Cleaned user/assistant turns can be stored after each completed response.
+* **Session ingest** — The full session can be ingested at session end for richer graph updates.
+* **Explicit tools** — Search, store, forget, and profile tools are available to the model when appropriate.
+* **Built-in file memory** — This does not replace `MEMORY.md` / `USER.md`; mirroring behavior depends on Hermes version and config (see upstream README).
+
+## Tools
+
+| Tool                  | Description                                     |
+| --------------------- | ----------------------------------------------- |
+| `supermemory_store`   | Store an explicit memory.                       |
+| `supermemory_search`  | Search by semantic similarity.                  |
+| `supermemory_forget`  | Forget a memory by ID or best-match query.      |
+| `supermemory_profile` | Retrieve persistent profile and recent context. |
+
+## Commands
+
+Interactive setup: pick **supermemory** and enter your API key.
+
+```
+hermes memory setup
+```
+
+## Environment variables
+
+These variables configure the supermemory provider (for example in your shell or Hermes env file):
+
+```bash theme={null}
+SUPERMEMORY_API_KEY=sm_...              # Required
+SUPERMEMORY_CONTAINER_TAG=hermes-work # Optional: overrides container tag from config
+```
+
+## Multi-container tags
+
+By default, recall and capture use a **single primary** `container_tag` (optionally profile-scoped with `{identity}`). **Multi-container mode** adds extra named tags so the model can read and write specific namespaces — for example work vs personal, or one bucket per project.
+
+**How to enable** — In `$HERMES_HOME/supermemory.json`, set:
+
+* `enable_custom_container_tags` to `true`
+* `custom_containers` to an array of allowed tag strings (e.g. `work`, `personal`, `project-alpha`)
+* `custom_container_instructions` (recommended) — short guidance the provider injects into the system prompt so Hermes knows **when** to use which tag
+
+Your primary `container_tag` stays the default namespace; listed custom tags are **additional** allowlisted namespaces.
+
+**How it works**
+
+* **`supermemory_search`**, **`supermemory_store`**, **`supermemory_forget`**, and **`supermemory_profile`** accept an optional **`container_tag`** argument. The tag must be either the **primary** `container_tag` (after template resolution) or one of **`custom_containers`**.
+* **Automatic behavior** (turn sync, prefetch, mirroring built-in memory writes, session-end ingest) always uses the **primary** container only — it does not pick a custom tag for you.
+* Instructions in `custom_container_instructions` steer the model toward passing the right `container_tag` on tool calls when the user’s intent matches a namespace (e.g. “check my personal notes” → `personal`).
+
+Example:
+
+```json theme={null}
+{
+  "container_tag": "hermes",
+  "enable_custom_container_tags": true,
+  "custom_containers": ["work", "personal", "shared-knowledge"],
+  "custom_container_instructions": "Use work for job and coding context, personal for life and hobbies, shared-knowledge for facts that apply across both."
+}
+```
+
+See the [upstream plugin README](https://github.com/NousResearch/hermes-agent/tree/main/plugins/memory/supermemory) for the exact schema and any newer options.
+
+## Config file
+
+Create or edit `$HERMES_HOME/supermemory.json`. Common keys:
+
+| Key                             | Default  | Description                                                                                                  |
+| ------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------ |
+| `container_tag`                 | `hermes` | Tag for search/writes; use `{identity}` for profile-scoped tags (e.g. `hermes-{identity}` → `hermes-coder`). |
+| `auto_recall`                   | `true`   | Inject memory context before turns.                                                                          |
+| `auto_capture`                  | `true`   | Store turns after each response.                                                                             |
+| `max_recall_results`            | `10`     | Max items merged into context.                                                                               |
+| `profile_frequency`             | `50`     | Profile on first turn and every N turns.                                                                     |
+| `capture_mode`                  | `all`    | How aggressively turns are captured.                                                                         |
+| `search_mode`                   | `hybrid` | `hybrid`, `memories`, or `documents`.                                                                        |
+| `api_timeout`                   | `5.0`    | SDK / ingest timeout (seconds).                                                                              |
+| `enable_custom_container_tags`  | `false`  | Set `true` to allow extra namespaces; see [Multi-container tags](#multi-container-tags) above.               |
+| `custom_containers`             | —        | Allowlisted tags beyond the primary `container_tag`.                                                         |
+| `custom_container_instructions` | —        | Prompt text that explains when to pass `container_tag` on tools.                                             |
+
+Example profile-scoped container:
+
+```json theme={null}
+{
+  "container_tag": "hermes-{identity}",
+  "search_mode": "hybrid",
+  "auto_recall": true,
+  "auto_capture": true
+}
+```
+
+## Self-hosted API
+
+If you run your own supermemory API, set **`base_url`** (and any other host-specific options) in `supermemory.json` or via env as documented in the [upstream plugin README](https://github.com/NousResearch/hermes-agent/tree/main/plugins/memory/supermemory) — alongside your key and container settings.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Hermes + plugin README" icon="github" href="https://github.com/NousResearch/hermes-agent/tree/main/plugins/memory/supermemory">
+    Full config table, env vars, and multi-container details.
+  </Card>
+
+  <Card title="OpenClaw Plugin" icon="messages-square" href="/integrations/openclaw">
+    Multi-platform memory for Telegram, WhatsApp, Discord, and more.
+  </Card>
+</CardGroup>
+
+Questions about the API or product? [Discord](https://supermemory.link/discord) · [support@supermemory.com](mailto:support@supermemory.com) · [Developer docs](/intro)

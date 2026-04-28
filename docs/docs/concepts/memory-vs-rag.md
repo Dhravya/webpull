@@ -1,0 +1,281 @@
+---
+title: "Memory vs RAG: Understanding the Difference"
+url: "https://supermemory.ai/docs/concepts/memory-vs-rag"
+---
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://supermemory.ai/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Memory vs RAG: Understanding the Difference
+
+> Learn why agent memory and RAG are fundamentally different, and when to use each approach
+
+Most developers confuse RAG (Retrieval-Augmented Generation) with agent memory. They're not the same thing, and using RAG for memory is why your agents keep forgetting important context. Let's understand the fundamental difference.
+
+## The Core Problem
+
+When building AI agents, developers often treat memory as just another retrieval problem. They store conversations in a vector database, embed queries, and hope semantic search will surface the right context.
+
+**This approach fails because memory isn't about finding similar text—it's about understanding relationships, temporal context, and user state over time.**
+
+## Documents vs Memories in Supermemory
+
+Supermemory makes a clear distinction between these two concepts:
+
+### Documents: Raw Knowledge
+
+Documents are the raw content you send to Supermemory—PDFs, web pages, text files. They represent static knowledge that doesn't change based on who's accessing it.
+
+**Characteristics:**
+
+* **Stateless**: A document about Python programming is the same for everyone
+* **Unversioned**: Content doesn't track changes over time
+* **Universal**: Not linked to specific users or entities
+* **Searchable**: Perfect for semantic similarity search
+
+**Use Cases:**
+
+* Company knowledge bases
+* Technical documentation
+* Research papers
+* General reference material
+
+### Memories: Contextual Understanding
+
+Memories are the insights, preferences, and relationships extracted from documents and conversations. They're tied to specific users or entities and evolve over time.
+
+**Characteristics:**
+
+* **Stateful**: "User prefers dark mode" is specific to that user
+* **Temporal**: Tracks when facts became true or invalid
+* **Personal**: Linked to users, sessions, or entities
+* **Relational**: Understands connections between facts
+
+**Use Cases:**
+
+* User preferences and history
+* Conversation context
+* Personal facts and relationships
+* Behavioral patterns
+
+## Why RAG Fails as Memory
+
+Let's look at a real scenario that illustrates the problem:
+
+<Tabs>
+  <Tab title="The Scenario">
+    ```
+    Day 1: "I love Adidas sneakers"
+    Day 30: "My Adidas broke after a month, terrible quality"
+    Day 31: "I'm switching to Puma"
+    Day 45: "What sneakers should I buy?"
+    ```
+  </Tab>
+
+  <Tab title="RAG Approach (Wrong)">
+    ```python theme={null}
+    # RAG sees these as isolated embeddings
+    query = "What sneakers should I buy?"
+
+    # Semantic search finds closest match
+    result = vector_search(query)
+    # Returns: "I love Adidas sneakers" (highest similarity)
+
+    # Agent recommends Adidas 🤦
+    ```
+
+    **Problem**: RAG finds the most semantically similar text but misses the temporal progression and causal relationships.
+  </Tab>
+
+  <Tab title="Memory Approach (Right)">
+    ```python theme={null}
+    # Supermemory understands temporal context
+    query = "What sneakers should I buy?"
+
+    # Memory retrieval considers:
+    # 1. Temporal validity (Adidas preference is outdated)
+    # 2. Causal relationships (broke → disappointment → switch)
+    # 3. Current state (now prefers Puma)
+
+    # Agent correctly recommends Puma ✅
+    ```
+
+    **Solution**: Memory systems track when facts become invalid and understand causal chains.
+  </Tab>
+</Tabs>
+
+## The Technical Difference
+
+### RAG: Semantic Similarity
+
+```
+Query → Embedding → Vector Search → Top-K Results → LLM
+```
+
+RAG excels at finding information that's semantically similar to your query. It's stateless—each query is independent.
+
+### Memory: Contextual Graph
+
+```
+Query → Entity Recognition → Graph Traversal → Temporal Filtering → Context Assembly → LLM
+```
+
+Memory systems build a knowledge graph that understands:
+
+* **Entities**: Users, products, concepts
+* **Relationships**: Preferences, ownership, causality
+* **Temporal Context**: When facts were true
+* **Invalidation**: When facts became outdated
+
+## When to Use Each
+
+<CardGroup cols={2}>
+  <Card title="Use RAG For" icon="search">
+    * Static documentation
+    * Knowledge bases
+    * Research queries
+    * General Q\&A
+    * Content that doesn't change per user
+  </Card>
+
+  <Card title="Use Memory For" icon="brain">
+    * User preferences
+    * Conversation history
+    * Personal facts
+    * Behavioral patterns
+    * Anything that evolves over time
+  </Card>
+</CardGroup>
+
+## Real-World Examples
+
+### E-commerce Assistant
+
+<Tabs>
+  <Tab title="RAG Component">
+    Stores product catalogs, specifications, reviews
+
+    ```python theme={null}
+    # Good for RAG
+    "What are the specs of iPhone 15?"
+    "Compare Nike and Adidas running shoes"
+    "Show me waterproof jackets"
+    ```
+  </Tab>
+
+  <Tab title="Memory Component">
+    Tracks user preferences, purchase history, interactions
+
+    ```python theme={null}
+    # Needs Memory
+    "What size do I usually wear?"
+    "Did I like my last purchase?"
+    "What's my budget preference?"
+    ```
+  </Tab>
+</Tabs>
+
+### Customer Support Bot
+
+<Tabs>
+  <Tab title="RAG Component">
+    FAQ documents, troubleshooting guides, policies
+
+    ```python theme={null}
+    # Good for RAG
+    "How do I reset my password?"
+    "What's your return policy?"
+    "Troubleshooting WiFi issues"
+    ```
+  </Tab>
+
+  <Tab title="Memory Component">
+    Previous issues, user account details, conversation context
+
+    ```python theme={null}
+    # Needs Memory
+    "Is my issue from last week resolved?"
+    "What plan am I on?"
+    "You were helping me with..."
+    ```
+  </Tab>
+</Tabs>
+
+## How Supermemory Handles Both
+
+Supermemory provides a unified platform that correctly handles both patterns:
+
+### 1. Document Storage (RAG)
+
+```python theme={null}
+# Add a document for RAG-style retrieval
+client.add(
+    content="iPhone 15 has a 48MP camera and A17 Pro chip",
+    # No user association - universal knowledge
+)
+```
+
+### 2. Memory Creation
+
+```python theme={null}
+# Add a user-specific memory
+client.add(
+    content="User prefers Android over iOS",
+    container_tags=["user_123"],  # User-specific
+    metadata={
+        "type": "preference",
+        "confidence": "high"
+    }
+)
+```
+
+### 3. Hybrid Retrieval
+
+```python theme={null}
+# Search combines both approaches
+results = client.documents.search(
+    query="What phone should I recommend?",
+    container_tags=["user_123"],  # Gets user memories
+    # Also searches general knowledge
+)
+
+# Results include:
+# - User's Android preference (memory)
+# - Latest Android phone specs (documents)
+```
+
+## The Bottom Line
+
+<Note>
+  **Key Insight**: RAG answers "What do I know?" while Memory answers "What do I remember about you?"
+</Note>
+
+Stop treating memory like a retrieval problem. Your agents need both:
+
+* **RAG** for accessing knowledge
+* **Memory** for understanding users
+
+Supermemory provides both capabilities in a unified platform, ensuring your agents have the right context at the right time.
+
+***
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Graph Memory" icon="network" href="/concepts/graph-memory">
+    How memory relationships work
+  </Card>
+
+  <Card title="Super RAG" icon="bolt" href="/concepts/super-rag">
+    Our managed RAG solution
+  </Card>
+
+  <Card title="Add Memories" icon="plus" href="/add-memories">
+    Start ingesting content
+  </Card>
+
+  <Card title="Search" icon="search" href="/search">
+    Query your memories and documents
+  </Card>
+</CardGroup>

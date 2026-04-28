@@ -1,0 +1,70 @@
+---
+title: "Cookbook"
+url: "https://supermemory.ai/docs/cookbook/overview"
+---
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://supermemory.ai/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Cookbook
+
+> Complete examples and recipes for building with Supermemory
+
+The Supermemory Cookbook provides complete, production-ready examples that show how to build real applications with Supermemory. Each recipe includes full implementation details, best practices, and common patterns.
+
+## Available Recipes
+
+<CardGroup cols={2}>
+  <Card title="Personal AI Assistant" icon="bot" href="/cookbook/personal-assistant">
+    Build an AI assistant that remembers user preferences and context across conversations
+  </Card>
+
+  <Card title="Document Q&A System" icon="file-text" href="/cookbook/document-qa">
+    Create a chatbot that answers questions from your documents with citations
+  </Card>
+
+  <Card title="Customer Support Bot" icon="headphones" href="/cookbook/customer-support">
+    Build a support system that remembers customer history and provides personalized help
+  </Card>
+
+  <Card title="AI SDK Integration" icon="triangle" href="/cookbook/ai-sdk-integration">
+    Complete examples using Vercel AI SDK with Supermemory tools
+  </Card>
+</CardGroup>
+
+## Coming Soon
+
+We're working on more comprehensive recipes. Have a suggestion? [Let us know!](mailto:support@supermemory.ai)
+
+<CardGroup cols={2}>
+  <Card title="Research Assistant" icon="search" color="#gray">
+    Organize and search through research papers and notes
+  </Card>
+
+  <Card title="Learning Platform" icon="users" color="#gray">
+    Build a personalized learning system with user isolation
+  </Card>
+
+  <Card title="Code Documentation Bot" icon="code" color="#gray">
+    Create an AI assistant for your codebase and documentation
+  </Card>
+
+  <Card title="Meeting Intelligence" icon="calendar" color="#gray">
+    Process and search through meeting recordings and notes
+  </Card>
+</CardGroup>
+
+## Getting Help
+
+Can't find what you're looking for?
+
+* Browse [Search](/search) for specific feature usage
+* Check the [AI SDK Examples](/cookbook/ai-sdk-integration) for complete implementations
+* Reach out to [support](mailto:support@supermemory.ai) for help
+
+## Contributing Recipes
+
+Have a great Supermemory use case? We'd love to add it to the cookbook!
+
+[Suggest a recipe →](mailto:support@supermemory.ai?subject=Cookbook%20Recipe%20Suggestion)

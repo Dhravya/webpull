@@ -1,0 +1,412 @@
+---
+title: "Ingesting context to supermemory"
+url: "https://supermemory.ai/docs/add-memories"
+---
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://supermemory.ai/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Ingesting context to supermemory
+
+> Add text, files, and URLs to Supermemory
+
+Send any raw content to Supermemory — conversations, documents, files, URLs. We extract the memories automatically.
+
+<Tip>
+  **Use `customId`** to identify your content (conversation ID, document ID, etc.). This enables updates and prevents duplicates.
+</Tip>
+
+## Quick Start
+
+<Tabs>
+  <Tab title="TypeScript">
+    ```typescript theme={null}
+    import Supermemory from 'supermemory';
+
+    const client = new Supermemory();
+
+    // Add text content
+    await client.add({
+      content: "Machine learning enables computers to learn from data",
+      containerTag: "user_123",
+      metadata: { category: "ai" }
+    });
+
+    // Add a URL (auto-extracted)
+    await client.add({
+      content: "https://youtube.com/watch?v=dQw4w9WgXcQ",
+      containerTag: "user_123"
+    });
+    ```
+  </Tab>
+
+  <Tab title="Python">
+    ```python theme={null}
+    from supermemory import Supermemory
+
+    client = Supermemory()
+
+    # Add text content
+    client.add(
+        content="Machine learning enables computers to learn from data",
+        container_tag="user_123",
+        metadata={"category": "ai"}
+    )
+
+    # Add a URL (auto-extracted)
+    client.add(
+        content="https://youtube.com/watch?v=dQw4w9WgXcQ",
+        container_tag="user_123"
+    )
+    ```
+  </Tab>
+
+  <Tab title="cURL">
+    ```bash theme={null}
+    curl -X POST "https://api.supermemory.ai/v3/documents" \
+      -H "Authorization: Bearer $SUPERMEMORY_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "content": "Machine learning enables computers to learn from data",
+        "containerTag": "user_123",
+        "metadata": {"category": "ai"}
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+**Response:**
+
+```json theme={null}
+{ "id": "abc123", "status": "queued" }
+```
+
+***
+
+## Updating Content
+
+Use `customId` to update existing documents or conversations. When you send content with the same `customId`, Supermemory intelligently processes only what's new.
+
+### Two ways to update:
+
+**Option 1: Send only the new content**
+
+```typescript theme={null}
+// First request
+await client.add({
+  content: "user: Hi, I'm Sarah.\nassistant: Nice to meet you!",
+  customId: "conv_123",
+  containerTag: "user_sarah"
+});
+
+// Later: send only new messages
+await client.add({
+  content: "user: What's the weather?\nassistant: It's sunny today.",
+  customId: "conv_123",  // Same ID — Supermemory links them
+  containerTag: "user_sarah"
+});
+```
+
+**Option 2: Send the full updated content**
+
+```typescript theme={null}
+// Supermemory detects the diff and only processes new parts
+await client.add({
+  content: "user: Hi, I'm Sarah.\nassistant: Nice to meet you!\nuser: What's the weather?\nassistant: It's sunny today.",
+  customId: "conv_123",
+  containerTag: "user_sarah"
+});
+```
+
+Both work — choose what fits your architecture.
+
+### Replace entire document
+
+To completely replace a document's content (not append), use `memories.update()`:
+
+```typescript theme={null}
+// Replace the entire document content
+await client.documents.update("doc_id_123", {
+  content: "Completely new content replacing everything",
+  metadata: { version: 2 }
+});
+```
+
+This triggers full reprocessing of the document. If you only update metadata (no content change), the document is updated in place with no reindexing.
+
+### Formatting conversations
+
+Format your conversations however you want. Supermemory handles any string format:
+
+```typescript theme={null}
+// Simple string
+content: "user: Hello\nassistant: Hi there!"
+
+// JSON stringify
+content: JSON.stringify(messages)
+
+// Template literal
+content: messages.map(m => `${m.role}: ${m.content}`).join('\n')
+
+// Any format — just make it a string
+content: formatConversation(messages)
+```
+
+***
+
+## Upload Files
+
+Upload PDFs, images, and documents directly.
+
+<Tabs>
+  <Tab title="TypeScript">
+    ```typescript theme={null}
+    import fs from 'fs';
+
+    await client.documents.uploadFile({
+      file: fs.createReadStream('document.pdf'),
+      containerTags: 'user_123'
+    });
+    ```
+  </Tab>
+
+  <Tab title="Python">
+    ```python theme={null}
+    with open('document.pdf', 'rb') as file:
+        client.documents.upload_file(
+            file=file,
+            container_tags='user_123'
+        )
+    ```
+  </Tab>
+
+  <Tab title="cURL">
+    ```bash theme={null}
+    curl -X POST "https://api.supermemory.ai/v3/documents/file" \
+      -H "Authorization: Bearer $SUPERMEMORY_API_KEY" \
+      -F "file=@document.pdf" \
+      -F "containerTags=user_123"
+    ```
+  </Tab>
+</Tabs>
+
+### Supported File Types
+
+| Type         | Formats                 | Processing                     |
+| ------------ | ----------------------- | ------------------------------ |
+| Documents    | PDF, DOC, DOCX, TXT, MD | Text extraction, OCR for scans |
+| Images       | JPG, PNG, GIF, WebP     | OCR text extraction            |
+| Spreadsheets | CSV, Google Sheets      | Structured data extraction     |
+| Videos       | YouTube URLs, MP4       | Auto-transcription             |
+
+**Limits:** 50MB max file size
+
+***
+
+## Parameters
+
+| Parameter       | Type   | Description                                                                                                                      |
+| --------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `content`       | string | **Required.** Any raw content — text, conversations, URLs, HTML                                                                  |
+| `customId`      | string | **Recommended.** Your ID for the content (conversation ID, doc ID). Enables updates and deduplication                            |
+| `containerTag`  | string | Group by user/project. Required for user profiles                                                                                |
+| `metadata`      | object | Key-value pairs for filtering (strings, numbers, booleans)                                                                       |
+| `entityContext` | string | Context for memory extraction on this container tag. Max 1500 chars. See [Customization](/concepts/customization#entity-context) |
+
+<AccordionGroup>
+  <Accordion title="Parameter Details & Examples">
+    **Content Types:**
+
+    ```typescript theme={null}
+    // Any text — conversations, notes, documents
+    { content: "Meeting notes from today's standup" }
+    { content: JSON.stringify(messages) }
+
+    // URLs (auto-detected and extracted)
+    { content: "https://example.com/article" }
+    { content: "https://youtube.com/watch?v=abc123" }
+
+    // Markdown, HTML, or any format
+    { content: "# Project Docs\n\n## Features\n- Real-time sync" }
+    ```
+
+    **Container Tags:**
+
+    ```typescript theme={null}
+    // By user
+    { containerTag: "user_123" }
+
+    // By project
+    { containerTag: "project_alpha" }
+
+    // Hierarchical
+    { containerTag: "org_456_team_backend" }
+    ```
+
+    **Custom IDs (Recommended):**
+
+    ```typescript theme={null}
+    // Use IDs from your system
+    { customId: "conv_abc123" }        // Conversation ID
+    { customId: "doc_456" }            // Document ID
+    { customId: "thread_789" }         // Thread ID
+    { customId: "meeting_2024_01_15" } // Meeting ID
+
+    // Updates: same customId = same document
+    // Supermemory only processes new/changed content
+    await client.add({
+      content: "Updated content...",
+      customId: "doc_456"  // Links to existing document
+    });
+    ```
+
+    **Metadata:**
+
+    ```typescript theme={null}
+    {
+      metadata: {
+        source: "slack",
+        author: "john",
+        priority: 1,
+        reviewed: true
+      }
+    }
+    ```
+
+    * No nested objects or arrays
+    * Values: string, number, or boolean only
+
+    **Entity Context:**
+
+    ```typescript theme={null}
+    // Guide memory extraction for this container tag
+    {
+      containerTag: "session_abc123",
+      entityContext: `Design exploration conversation between john@acme.com and Brand.ai assistant.
+        Focus on John's design preferences and brand requirements.`
+    }
+    ```
+
+    * Max 1500 characters
+    * Persists on the container tag
+    * Combines with org-level filter prompts
+  </Accordion>
+</AccordionGroup>
+
+***
+
+## Processing Pipeline
+
+When you add content, Supermemory:
+
+1. **Validates** your request
+2. **Stores** the document and queues for processing
+3. **Extracts** content (OCR, transcription, web scraping)
+4. **Chunks** into searchable memories
+5. **Embeds** for vector search
+6. **Indexes** for retrieval
+
+Track progress with `GET /v3/documents/{id}`:
+
+```typescript theme={null}
+const doc = await client.documents.get("abc123");
+console.log(doc.status); // "queued" | "processing" | "done"
+```
+
+<AccordionGroup>
+  <Accordion title="Batch Upload">
+    Process multiple documents with rate limiting:
+
+    ```typescript theme={null}
+    async function batchUpload(documents: Array<{id: string, content: string}>) {
+      const results = [];
+
+      for (const doc of documents) {
+        try {
+          const result = await client.add({
+            content: doc.content,
+            customId: doc.id,
+            containerTag: "batch_import"
+          });
+          results.push({ id: doc.id, success: true, docId: result.id });
+        } catch (error) {
+          results.push({ id: doc.id, success: false, error });
+        }
+
+        // Rate limit: 1 second between requests
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      return results;
+    }
+    ```
+
+    **Tips:**
+
+    * Batch size: 3-5 documents at once
+    * Delay: 1-2 seconds between requests
+    * Use `customId` to track and deduplicate
+  </Accordion>
+
+  <Accordion title="Error Handling">
+    | Status | Error                 | Cause                                       |
+    | ------ | --------------------- | ------------------------------------------- |
+    | 400    | BadRequestError       | Missing required fields, invalid parameters |
+    | 401    | AuthenticationError   | Invalid or missing API key                  |
+    | 403    | PermissionDeniedError | Insufficient permissions                    |
+    | 429    | RateLimitError        | Too many requests or quota exceeded         |
+    | 500    | InternalServerError   | Processing failure                          |
+
+    ```typescript theme={null}
+    import { BadRequestError, RateLimitError } from 'supermemory';
+
+    try {
+      await client.add({ content: "..." });
+    } catch (error) {
+      if (error instanceof RateLimitError) {
+        // Wait and retry
+        await new Promise(r => setTimeout(r, 60000));
+      } else if (error instanceof BadRequestError) {
+        // Fix request parameters
+        console.error("Invalid request:", error.message);
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Delete Content">
+    **Single delete:**
+
+    ```typescript theme={null}
+    await client.documents.delete("doc_id_123");
+    ```
+
+    **Bulk delete by IDs:**
+
+    ```typescript theme={null}
+    await client.documents.deleteBulk({
+      ids: ["doc_1", "doc_2", "doc_3"]
+    });
+    ```
+
+    **Bulk delete by container tag:**
+
+    ```typescript theme={null}
+    // Delete all content for a user
+    await client.documents.deleteBulk({
+      containerTags: ["user_123"]
+    });
+    ```
+
+    Deletes are permanent — no recovery.
+  </Accordion>
+</AccordionGroup>
+
+***
+
+## Next Steps
+
+* [Search Memories](/search) — Query your content
+* [User Profiles](/user-profiles) — Get user context
+* [Organizing & Filtering](/concepts/filtering) — Container tags and metadata

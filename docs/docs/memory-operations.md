@@ -1,0 +1,215 @@
+---
+title: "Memory Operations"
+url: "https://supermemory.ai/docs/memory-operations"
+---
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://supermemory.ai/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Memory Operations
+
+> Advanced memory operations (v4 API)
+
+<Info>
+  These v4 endpoints operate on extracted memories (not raw documents). SDK support coming soon — use fetch or cURL for now.
+
+  For document management (list, get, update, delete), see [Document Operations](/document-operations).
+  For ingesting raw content (text, files, URLs) through the processing pipeline, see [Add Context](/add-memories).
+</Info>
+
+## Create Memories
+
+Create memories directly without going through the document ingestion workflow. Memories are embedded and immediately searchable.
+
+This is useful for storing user preferences, traits, or any structured facts where you already know the exact memory content.
+
+<Tabs>
+  <Tab title="fetch">
+    ```typescript theme={null}
+    const response = await fetch("https://api.supermemory.ai/v4/memories", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        memories: [
+          {
+            content: "John prefers dark mode",
+            isStatic: false,
+            metadata: { source: "user_preference" }
+          },
+          {
+            content: "John is from Seattle",
+            isStatic: true
+          }
+        ],
+        containerTag: "user_123"
+      })
+    });
+
+    const data = await response.json();
+    // {
+    //   documentId: "abc123",
+    //   memories: [
+    //     { id: "mem_1", memory: "John prefers dark mode", isStatic: false, createdAt: "2025-..." },
+    //     { id: "mem_2", memory: "John is from Seattle", isStatic: true, createdAt: "2025-..." }
+    //   ]
+    // }
+    ```
+  </Tab>
+
+  <Tab title="cURL">
+    ```bash theme={null}
+    curl -X POST "https://api.supermemory.ai/v4/memories" \
+      -H "Authorization: Bearer $SUPERMEMORY_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "memories": [
+          {
+            "content": "John prefers dark mode",
+            "isStatic": false,
+            "metadata": { "source": "user_preference" }
+          },
+          {
+            "content": "John is from Seattle",
+            "isStatic": true
+          }
+        ],
+        "containerTag": "user_123"
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+### Parameters
+
+| Parameter             | Type    | Required | Description                                                                                 |
+| --------------------- | ------- | -------- | ------------------------------------------------------------------------------------------- |
+| `memories`            | array   | yes      | Array of memory objects (1–100 items)                                                       |
+| `memories[].content`  | string  | yes      | The memory text (max 10,000 chars). Should be entity-centric, e.g. "John prefers dark mode" |
+| `memories[].isStatic` | boolean | no       | `true` for permanent identity traits (name, hometown). Defaults to `false`                  |
+| `memories[].metadata` | object  | no       | Key-value metadata (strings, numbers, booleans)                                             |
+| `containerTag`        | string  | yes      | Space / container tag these memories belong to                                              |
+
+### Response
+
+```json theme={null}
+{
+  "documentId": "abc123",
+  "memories": [
+    {
+      "id": "mem_1",
+      "memory": "John prefers dark mode",
+      "isStatic": false,
+      "createdAt": "2025-01-15T10:30:00.000Z"
+    }
+  ]
+}
+```
+
+| Field                  | Type           | Description                                                    |
+| ---------------------- | -------------- | -------------------------------------------------------------- |
+| `documentId`           | string \| null | ID of the lightweight source document created for traceability |
+| `memories`             | array          | The created memory entries                                     |
+| `memories[].id`        | string         | Unique memory ID                                               |
+| `memories[].memory`    | string         | The memory content                                             |
+| `memories[].isStatic`  | boolean        | Whether this is a permanent trait                              |
+| `memories[].createdAt` | string         | ISO 8601 timestamp                                             |
+
+<Tip>
+  **When to use this vs [Add Context](/add-memories)?**
+
+  Use **Create Memories** when you already know the exact facts to store (user preferences, traits, structured data). Use **Add Context** when you have raw content (conversations, documents, URLs) that Supermemory should process and extract memories from.
+</Tip>
+
+***
+
+## Forget Memory
+
+Soft-delete a memory — excluded from search results but preserved in the system. Use this when you might want to restore later.
+
+<Tabs>
+  <Tab title="fetch">
+    ```typescript theme={null}
+    await fetch("https://api.supermemory.ai/v4/memories/mem_abc123/forget", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${API_KEY}`
+      }
+    });
+    ```
+  </Tab>
+
+  <Tab title="cURL">
+    ```bash theme={null}
+    curl -X POST "https://api.supermemory.ai/v4/memories/mem_abc123/forget" \
+      -H "Authorization: Bearer $SUPERMEMORY_API_KEY"
+    ```
+  </Tab>
+</Tabs>
+
+The memory will no longer appear in search results but remains in the database.
+
+***
+
+## Update Memory (Versioned)
+
+Update a memory by creating a new version. The original is preserved with `isLatest=false`.
+
+<Tabs>
+  <Tab title="fetch">
+    ```typescript theme={null}
+    await fetch("https://api.supermemory.ai/v4/memories", {
+      method: "PATCH",
+      headers: {
+        "Authorization": `Bearer ${API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        // Identify by ID or content
+        id: "mem_abc123",
+        // content: "Original content to match",
+
+        newContent: "Updated content goes here",
+        metadata: {
+          tags: ["updated"]
+        }
+      })
+    });
+    ```
+  </Tab>
+
+  <Tab title="cURL">
+    ```bash theme={null}
+    curl -X PATCH "https://api.supermemory.ai/v4/memories" \
+      -H "Authorization: Bearer $SUPERMEMORY_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "id": "mem_abc123",
+        "newContent": "Updated content goes here",
+        "metadata": {"tags": ["updated"]}
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+### Parameters
+
+| Parameter    | Type   | Required | Description                                   |
+| ------------ | ------ | -------- | --------------------------------------------- |
+| `id`         | string | \*       | Memory ID to update                           |
+| `content`    | string | \*       | Original content to match (alternative to ID) |
+| `newContent` | string | yes      | New content for the memory                    |
+| `metadata`   | object | no       | Updated metadata                              |
+
+\* Either `id` or `content` must be provided.
+
+***
+
+## Next Steps
+
+* [Document Operations](/document-operations) — Manage documents (SDK supported)
+* [Search](/search) — Query your memories
+* [Ingesting Content](/add-memories) — Add new content

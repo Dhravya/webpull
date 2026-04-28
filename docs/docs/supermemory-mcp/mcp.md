@@ -1,0 +1,137 @@
+---
+title: "Overview"
+url: "https://supermemory.ai/docs/supermemory-mcp/mcp"
+---
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://supermemory.ai/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Overview
+
+> Give your AI assistants persistent memory with the Model Context Protocol
+
+Supermemory MCP Server 4.0 gives AI assistants (Claude, Cursor, Windsurf, etc.) persistent memory across conversations. Built on Cloudflare Workers with Durable Objects for scalable, persistent connections.
+
+## Quick Install
+
+```bash theme={null}
+npx -y install-mcp@latest https://mcp.supermemory.ai/mcp --client claude --oauth=yes
+```
+
+Replace `claude` with your MCP client: `cursor`, `windsurf`, `vscode`, etc.
+
+## Manual Configuration
+
+Add to your MCP client config:
+
+```json theme={null}
+{
+  "mcpServers": {
+    "supermemory": {
+      "url": "https://mcp.supermemory.ai/mcp"
+    }
+  }
+}
+```
+
+The server uses **OAuth** by default. Your client will discover the authorization server via `/.well-known/oauth-protected-resource` and prompt you to authenticate.
+
+### API Key Authentication (Alternative)
+
+If you prefer API keys over OAuth, get one from [app.supermemory.ai](https://app.supermemory.ai) and pass it in the `Authorization` header:
+
+```json theme={null}
+{
+  "mcpServers": {
+    "supermemory": {
+      "url": "https://mcp.supermemory.ai/mcp",
+      "headers": {
+        "Authorization": "Bearer sm_your_api_key_here"
+      }
+    }
+  }
+}
+```
+
+API keys start with `sm_` and skip OAuth when provided.
+
+### Project Scoping
+
+Scope all operations to a specific project with `x-sm-project`:
+
+```json theme={null}
+{
+  "mcpServers": {
+    "supermemory": {
+      "url": "https://mcp.supermemory.ai/mcp",
+      "headers": {
+        "x-sm-project": "your-project-id"
+      }
+    }
+  }
+}
+```
+
+## Tools
+
+### `memory`
+
+Save or forget information about the user.
+
+| Parameter      | Type                   | Required | Description                          |
+| -------------- | ---------------------- | -------- | ------------------------------------ |
+| `content`      | string                 | Yes      | The memory content to save or forget |
+| `action`       | `"save"` \| `"forget"` | No       | Default: `"save"`                    |
+| `containerTag` | string                 | No       | Project tag to scope the memory      |
+
+### `recall`
+
+Search memories and get user profile.
+
+| Parameter        | Type    | Required | Description                                   |
+| ---------------- | ------- | -------- | --------------------------------------------- |
+| `query`          | string  | Yes      | Search query to find relevant memories        |
+| `includeProfile` | boolean | No       | Include user profile summary. Default: `true` |
+| `containerTag`   | string  | No       | Project tag to scope the search               |
+
+### `whoAmI`
+
+Get the current logged-in user's information. Returns `{ userId, email, name, client, sessionId }`.
+
+## Resources
+
+| URI                      | Description                                              |
+| ------------------------ | -------------------------------------------------------- |
+| `supermemory://profile`  | User profile with stable preferences and recent activity |
+| `supermemory://projects` | List of available memory projects                        |
+
+## Prompts
+
+### `context`
+
+Inject user profile and preferences as system context for AI conversations. Returns a formatted message with the user's stable preferences and recent activity.
+You can access this in Cursor and Claude Code by just doing /context, which will give the LLMs just enough context to use and query supermemory more.
+**Purpose:** Unlike the `recall` tool (which searches for specific information) or the `profile` resource (which returns raw data), the `context` prompt provides a pre-formatted system message designed for context injection at the start of conversations.
+
+| Parameter       | Type    | Required | Description                                             |
+| --------------- | ------- | -------- | ------------------------------------------------------- |
+| `containerTag`  | string  | No       | Project tag to scope the profile (max 128 chars)        |
+| `includeRecent` | boolean | No       | Include recent activity in the profile. Default: `true` |
+
+**Output format:**
+
+* Includes instructions to save new memories using the `memory` tool
+* **Stable Preferences:** Long-term user facts and preferences
+* **Recent Activity:** Recent interactions and context (when `includeRecent` is `true`)
+* Fallback message when no profile exists yet
+
+**When to use:**
+
+* Use `context` prompt for automatic system context injection at conversation start
+* Use `recall` tool when you need to search for specific information
+* Use `profile` resource when you need raw profile data for custom processing
+
+<Card title="MCP Server Source Code" icon="github" href="https://github.com/supermemoryai/supermemory/tree/main/apps/mcp">
+  View the open-source implementation
+</Card>

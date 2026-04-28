@@ -1,0 +1,124 @@
+---
+title: "CLI Reference"
+url: "https://supermemory.ai/docs/memorybench/cli"
+---
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://supermemory.ai/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# CLI Reference
+
+> Command-line interface for running MemoryBench evaluations
+
+## Commands
+
+### run
+
+Execute the full benchmark pipeline.
+
+```bash theme={null}
+bun run src/index.ts run -p <provider> -b <benchmark> -j <judge> -r <run-id>
+```
+
+| Option                  | Description                                          |
+| ----------------------- | ---------------------------------------------------- |
+| `-p, --provider`        | Memory provider (`supermemory`, `mem0`, `zep`)       |
+| `-b, --benchmark`       | Benchmark (`locomo`, `longmemeval`, `convomem`)      |
+| `-j, --judge`           | Judge model (default: `gpt-4o`)                      |
+| `-r, --run-id`          | Run identifier (auto-generated if omitted)           |
+| `-m, --answering-model` | Model for answer generation (default: `gpt-4o`)      |
+| `-l, --limit`           | Limit number of questions                            |
+| `-s, --sample`          | Sample N questions per category                      |
+| `--sample-type`         | Sampling strategy: `consecutive` (default), `random` |
+| `--force`               | Clear checkpoint and restart                         |
+
+See [Supported Models](/memorybench/supported-models) for all available judge and answering models.
+
+***
+
+### compare
+
+Run benchmark across multiple providers in parallel.
+
+```bash theme={null}
+bun run src/index.ts compare -p supermemory,mem0,zep -b locomo -j gpt-4o
+```
+
+***
+
+### test
+
+Evaluate a single question for debugging.
+
+```bash theme={null}
+bun run src/index.ts test -r <run-id> -q <question-id>
+```
+
+***
+
+### status
+
+Check progress of a run.
+
+```bash theme={null}
+bun run src/index.ts status -r <run-id>
+```
+
+***
+
+### show-failures
+
+Debug failed questions with full context.
+
+```bash theme={null}
+bun run src/index.ts show-failures -r <run-id>
+```
+
+***
+
+### list-questions
+
+Browse benchmark questions.
+
+```bash theme={null}
+bun run src/index.ts list-questions -b <benchmark>
+```
+
+***
+
+### Random Sampling
+
+Sample N questions per category with optional randomization.
+
+```bash theme={null}
+bun run src/index.ts run -p supermemory -b longmemeval -s 3 --sample-type random
+```
+
+***
+
+### serve
+
+Start the web UI.
+
+```bash theme={null}
+bun run src/index.ts serve
+```
+
+Opens at [http://localhost:3000](http://localhost:3000).
+
+***
+
+### help
+
+Get help on providers, models, or benchmarks.
+
+```bash theme={null}
+bun run src/index.ts help providers
+bun run src/index.ts help models
+bun run src/index.ts help benchmarks
+```
+
+## Checkpointing
+
+Runs are saved to `data/runs/{runId}/` and automatically resume from the last successful phase. Use `--force` to restart.

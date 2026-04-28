@@ -1,0 +1,253 @@
+---
+title: "Migrating from Mem0 to Supermemory"
+url: "https://supermemory.ai/docs/migration/from-mem0"
+---
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://supermemory.ai/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Migrating from Mem0 to Supermemory
+
+> Complete guide to migrate your data and applications from Mem0 to Supermemory
+
+Migrating from Mem0 to Supermemory is straightforward. This guide walks you through exporting your memories from Mem0 and importing them into Supermemory.
+
+## Why Migrate to Supermemory?
+
+Supermemory offers enhanced capabilities over Mem0:
+
+* **Knowledge graph** architecture for better context relationships
+* **Multiple content types** (URLs, PDFs, images, videos)
+* **Generous free tier** (100k tokens) with affordable pricing
+* **Multiple integration options** (API, MCP, SDKs)
+
+## Quick Migration (All-in-One)
+
+Complete migration in one script:
+
+```python theme={null}
+from mem0 import MemoryClient
+from supermemory import Supermemory
+import json, time
+
+# Export from Mem0
+mem0 = MemoryClient(api_key="your_mem0_api_key")
+export = mem0.create_memory_export(
+    schema={"type": "object", "properties": {"memories": {"type": "array", "items": {"type": "object"}}}},
+    filters={}
+)
+time.sleep(5)
+data = mem0.get_memory_export(memory_export_id=export["id"])
+
+# Import to Supermemory
+supermemory = Supermemory(api_key="your_supermemory_api_key")
+for memory in data["memories"]:
+    if memory.get("content"):
+        supermemory.memories.add(
+            content=memory["content"],
+            container_tags=["imported_from_mem0"]
+        )
+        print(f"✅ {memory['content'][:50]}...")
+
+print("Migration complete!")
+```
+
+## Step-by-Step Migration
+
+<Steps>
+  <Step title="Export from Mem0">
+    Mem0 provides two ways to export your memories:
+
+    ### Option 1: Export via Dashboard (Recommended)
+
+    1. Log into your [Mem0 dashboard](https://app.mem0.ai)
+    2. Navigate to the export section
+    3. Download your memories as JSON
+
+    ### Option 2: Export via API
+
+    Simple script to export all your memories from Mem0:
+
+    ```python theme={null}
+    from mem0 import MemoryClient
+    import json
+    import time
+
+    # Connect to Mem0
+    client = MemoryClient(api_key="your_mem0_api_key")
+
+    # Create export job
+    schema = {
+        "type": "object",
+        "properties": {
+            "memories": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "content": {"type": "string"},
+                        "metadata": {"type": "object"},
+                        "created_at": {"type": "string"}
+                    }
+                }
+            }
+        }
+    }
+
+    response = client.create_memory_export(schema=schema, filters={})
+    export_id = response["id"]
+
+    # Wait and retrieve
+    print("Exporting memories...")
+    time.sleep(5)
+    export_data = client.get_memory_export(memory_export_id=export_id)
+
+    # Save to file
+    with open("mem0_export.json", "w") as f:
+        json.dump(export_data, f, indent=2)
+
+    print(f"Exported {len(export_data['memories'])} memories")
+    ```
+  </Step>
+
+  <Step title="Set Up Supermemory">
+    Create your Supermemory account and get your API key:
+
+    1. Sign up at [console.supermemory.ai](https://console.supermemory.ai)
+    2. Create a new project
+    3. Generate an API key from the dashboard
+
+    ```bash theme={null}
+    # Set your environment variable
+    export SUPERMEMORY_API_KEY="your_supermemory_api_key"
+    ```
+  </Step>
+
+  <Step title="Import to Supermemory">
+    Simple script to import your Mem0 memories into Supermemory:
+
+    ```python theme={null}
+    import json
+    from supermemory import Supermemory
+
+    # Load your Mem0 export
+    with open("mem0_export.json", "r") as f:
+        mem0_data = json.load(f)
+
+    # Connect to Supermemory
+    client = Supermemory(api_key="your_supermemory_api_key")
+
+    # Import memories
+    for memory in mem0_data["memories"]:
+        content = memory.get("content", "")
+
+        # Skip empty memories
+        if not content:
+            continue
+
+        # Import to Supermemory
+        try:
+            result = client.add(
+                content=content,
+                container_tags=["imported_from_mem0"],
+                metadata={
+                    "source": "mem0",
+                    "created_at": memory.get("created_at"),
+                    **(memory.get("metadata") or {})
+                }
+            )
+            print(f"Imported: {content[:50]}...")
+        except Exception as e:
+            print(f"Failed: {e}")
+
+    print("Migration complete!")
+    ```
+  </Step>
+</Steps>
+
+## API Migration Reference
+
+Here's how common Mem0 operations map to Supermemory:
+
+### Adding Memories
+
+<CodeGroup>
+  ```python mem0 theme={null}
+  from mem0 import MemoryClient
+
+  client = MemoryClient(api_key="...")
+  client.add(
+      messages="User prefers dark mode",
+      user_id="alice"
+  )
+  ```
+
+  ```python Supermemory theme={null}
+  from supermemory import Supermemory
+
+  client = Supermemory(api_key="...")
+  client.add(
+      content="User prefers dark mode",
+      container_tags=["user_alice"]
+  )
+  ```
+</CodeGroup>
+
+### Searching Memories
+
+<CodeGroup>
+  ```python Mem0 theme={null}
+  results = client.search(
+      query="user preferences",
+      user_id="alice"
+  )
+  ```
+
+  ```python Supermemory theme={null}
+  results = client.documents.search(
+      query="user preferences",
+      container_tags=["user_alice"]
+  )
+  ```
+</CodeGroup>
+
+### Getting All Memories
+
+<CodeGroup>
+  ```python Mem0 theme={null}
+  memories = client.get_all(
+      user_id="alice"
+  )
+  ```
+
+  ```python Supermemory theme={null}
+  memories = client.documents.list(
+      container_tags=["user_alice"],
+      limit=100
+  )
+  ```
+</CodeGroup>
+
+### Deleting Memories
+
+<CodeGroup>
+  ```python Mem0 theme={null}
+  client.delete(memory_id="mem_123")
+  ```
+
+  ```python Supermemory theme={null}
+  client.documents.delete("mem_123")
+  ```
+</CodeGroup>
+
+<Note>
+  For enterprise migrations, [contact us](mailto:support@supermemory.ai) for assistance.
+</Note>
+
+## Next Steps
+
+1. [Explore](/how-it-works) how Supermemory works
+2. Read the [quickstart](/quickstart) and add and retrieve your first memories
+3. [Connect](/connectors/overview) to Google Drive, Notion, and OneDrive with automatic syncing

@@ -1,0 +1,489 @@
+---
+title: "Mastra"
+url: "https://supermemory.ai/docs/integrations/mastra"
+---
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://supermemory.ai/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Mastra
+
+> Add persistent memory to Mastra AI agents with Supermemory processors
+
+Integrate Supermemory with [Mastra](https://mastra.ai) to give your AI agents persistent memory. Use the `withSupermemory` wrapper for zero-config setup or processors for fine-grained control.
+
+<Card title="@supermemory/tools on npm" icon="npm" href="https://www.npmjs.com/package/@supermemory/tools">
+  Check out the NPM page for more details
+</Card>
+
+## Installation
+
+```bash theme={null}
+npm install @supermemory/tools @mastra/core
+```
+
+## Quick Start
+
+Wrap your agent config with `withSupermemory` to add memory capabilities:
+
+```typescript theme={null}
+import { Agent } from "@mastra/core/agent"
+import { withSupermemory } from "@supermemory/tools/mastra"
+import { openai } from "@ai-sdk/openai"
+
+// Create agent with memory-enhanced config
+const agent = new Agent(withSupermemory(
+  {
+    id: "my-assistant",
+    name: "My Assistant",
+    model: openai("gpt-4o"),
+    instructions: "You are a helpful assistant.",
+  },
+  {
+    containerTag: "user-123",  // Required: scopes memories to this user
+    customId: "conv-456",      // Required: groups messages for contextual memory
+    mode: "full",
+  }
+))
+
+const response = await agent.generate("What do you know about me?")
+```
+
+<Note>
+  **Memory saving is enabled by default.** Conversations are automatically saved to Supermemory. To disable saving:
+
+  ```typescript theme={null}
+  const agent = new Agent(withSupermemory(
+    { id: "my-assistant", model: openai("gpt-4o"), ... },
+    {
+      containerTag: "user-123",
+      customId: "conv-456",
+      addMemory: "never",  // Disable automatic conversation saving
+    }
+  ))
+  ```
+</Note>
+
+***
+
+## How It Works
+
+The Mastra integration uses Mastra's native [Processor](https://mastra.ai/docs/agents/processors) interface:
+
+1. **Input Processor** - Fetches relevant memories from Supermemory and injects them into the system prompt before the LLM call
+2. **Output Processor** - Optionally saves the conversation to Supermemory after generation completes
+
+```mermaid theme={null}
+sequenceDiagram
+    participant User
+    participant Agent
+    participant InputProcessor
+    participant LLM
+    participant OutputProcessor
+    participant Supermemory
+
+    User->>Agent: Send message
+    Agent->>InputProcessor: Process input
+    InputProcessor->>Supermemory: Fetch memories
+    Supermemory-->>InputProcessor: Return memories
+    InputProcessor->>Agent: Inject into system prompt
+    Agent->>LLM: Generate response
+    LLM-->>Agent: Return response
+    Agent->>OutputProcessor: Process output
+    OutputProcessor->>Supermemory: Save conversation (if enabled)
+    Agent-->>User: Return response
+```
+
+***
+
+## Configuration Options
+
+| Option           | Type                             | Default                      | Description                                                  |
+| ---------------- | -------------------------------- | ---------------------------- | ------------------------------------------------------------ |
+| `containerTag`   | `string`                         | **Required**                 | User/container tag for scoping memories                      |
+| `customId`       | `string`                         | **Required**                 | Groups messages into a single document for contextual memory |
+| `apiKey`         | `string`                         | `SUPERMEMORY_API_KEY` env    | Your Supermemory API key                                     |
+| `baseUrl`        | `string`                         | `https://api.supermemory.ai` | Custom API endpoint                                          |
+| `mode`           | `"profile" \| "query" \| "full"` | `"profile"`                  | Memory search mode                                           |
+| `addMemory`      | `"always" \| "never"`            | `"always"`                   | Auto-save conversations                                      |
+| `verbose`        | `boolean`                        | `false`                      | Enable debug logging                                         |
+| `promptTemplate` | `function`                       | -                            | Custom memory formatting                                     |
+
+***
+
+## Memory Search Modes
+
+**Profile Mode (Default)** - Retrieves the user's complete profile without query-based filtering:
+
+```typescript theme={null}
+const agent = new Agent(withSupermemory(config, {
+  containerTag: "user-123",
+  customId: "conv-456",
+  mode: "profile",
+}))
+```
+
+**Query Mode** - Searches memories based on the user's message:
+
+```typescript theme={null}
+const agent = new Agent(withSupermemory(config, {
+  containerTag: "user-123",
+  customId: "conv-456",
+  mode: "query",
+}))
+```
+
+**Full Mode** - Combines profile AND query-based search for maximum context:
+
+````typescript theme={null}
+const agent = new Agent(withSupermemory(config, {
+  containerTag: "user-123",
+  customId: "conv-456",
+  mode: "full",
+}))
+
+### Mode Comparison
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `profile` | Static + dynamic user facts | General personalization |
+| `query` | Semantic search on user message | Specific Q&A |
+| `full` | Both profile and search | Chatbots, assistants |
+
+---
+
+## Saving Conversations
+
+Conversation saving is enabled by default (`addMemory: "always"`). Messages are grouped using the required `customId`:
+
+```typescript
+const agent = new Agent(withSupermemory(
+  { id: "my-assistant", model: openai("gpt-4o"), instructions: "..." },
+  {
+    containerTag: "user-123",
+    customId: "conv-456",  // Required: groups messages for contextual memory
+  }
+))
+
+// All messages in this conversation are saved automatically
+await agent.generate("I prefer TypeScript over JavaScript")
+await agent.generate("My favorite framework is Next.js")
+````
+
+To disable automatic saving:
+
+```typescript theme={null}
+const agent = new Agent(withSupermemory(
+  { id: "my-assistant", model: openai("gpt-4o"), instructions: "..." },
+  {
+    containerTag: "user-123",
+    customId: "conv-456",
+    addMemory: "never",  // Only retrieve memories, don't save
+  }
+))
+```
+
+***
+
+## Custom Prompt Templates
+
+Customize how memories are formatted and injected. The template receives `userMemories`, `generalSearchMemories`, and `searchResults` (raw array for filtering by metadata):
+
+```typescript theme={null}
+import { Agent } from "@mastra/core/agent"
+import { withSupermemory } from "@supermemory/tools/mastra"
+import type { MemoryPromptData } from "@supermemory/tools/mastra"
+
+const claudePrompt = (data: MemoryPromptData) => `
+<context>
+  <user_profile>
+    ${data.userMemories}
+  </user_profile>
+  <relevant_memories>
+    ${data.generalSearchMemories}
+  </relevant_memories>
+</context>
+`.trim()
+
+const agent = new Agent(withSupermemory(
+  { id: "my-assistant", model: openai("gpt-4o"), instructions: "..." },
+  {
+    containerTag: "user-123",
+    customId: "conv-456",
+    mode: "full",
+    promptTemplate: claudePrompt,
+  }
+))
+```
+
+***
+
+## Direct Processor Usage
+
+For advanced use cases, use processors directly instead of the wrapper:
+
+### Input Processor Only
+
+Inject memories without saving conversations:
+
+```typescript theme={null}
+import { Agent } from "@mastra/core/agent"
+import { createSupermemoryProcessor } from "@supermemory/tools/mastra"
+import { openai } from "@ai-sdk/openai"
+
+const agent = new Agent({
+  id: "my-assistant",
+  name: "My Assistant",
+  model: openai("gpt-4o"),
+  inputProcessors: [
+    createSupermemoryProcessor({
+      containerTag: "user-123",
+      customId: "conv-456",
+      mode: "full",
+      addMemory: "never",
+      verbose: true,
+    }),
+  ],
+})
+```
+
+### Output Processor Only
+
+Save conversations without memory injection:
+
+```typescript theme={null}
+import { Agent } from "@mastra/core/agent"
+import { createSupermemoryOutputProcessor } from "@supermemory/tools/mastra"
+import { openai } from "@ai-sdk/openai"
+
+const agent = new Agent({
+  id: "my-assistant",
+  name: "My Assistant",
+  model: openai("gpt-4o"),
+  outputProcessors: [
+    createSupermemoryOutputProcessor({
+      containerTag: "user-123",
+      customId: "conv-456",
+    }),
+  ],
+})
+```
+
+### Both Processors
+
+Use the factory function for shared configuration:
+
+```typescript theme={null}
+import { Agent } from "@mastra/core/agent"
+import { createSupermemoryProcessors } from "@supermemory/tools/mastra"
+import { openai } from "@ai-sdk/openai"
+
+const { input, output } = createSupermemoryProcessors({
+  containerTag: "user-123",
+  customId: "conv-456",
+  mode: "full",
+  verbose: true,
+})
+
+const agent = new Agent({
+  id: "my-assistant",
+  name: "My Assistant",
+  model: openai("gpt-4o"),
+  inputProcessors: [input],
+  outputProcessors: [output],
+})
+```
+
+***
+
+## Using RequestContext for Dynamic Thread IDs
+
+For server setups where one agent instance handles multiple concurrent conversations, use Mastra's `RequestContext` to provide per-request thread IDs. **RequestContext takes precedence** over the construction-time `customId`:
+
+```typescript theme={null}
+import { Agent } from "@mastra/core/agent"
+import { RequestContext, MASTRA_THREAD_ID_KEY } from "@mastra/core/request-context"
+import { withSupermemory } from "@supermemory/tools/mastra"
+import { openai } from "@ai-sdk/openai"
+
+const agent = new Agent(withSupermemory(
+  { id: "my-assistant", model: openai("gpt-4o"), instructions: "..." },
+  {
+    containerTag: "user-123",
+    customId: "fallback-conv",  // Used only when RequestContext doesn't provide a threadId
+    mode: "full",
+  }
+))
+
+// Per-request threadId takes precedence over customId
+const ctx = new RequestContext()
+ctx.set(MASTRA_THREAD_ID_KEY, "user-456-session-789")
+
+await agent.generate("Hello!", { requestContext: ctx })
+// This conversation is stored under "user-456-session-789", not "fallback-conv"
+```
+
+<Note>
+  **Server-side usage**: Always use `RequestContext` to pass unique conversation IDs per request. Using a fixed `customId` for all requests will merge conversations from different users.
+</Note>
+
+***
+
+## Verbose Logging
+
+Enable detailed logging for debugging:
+
+```typescript theme={null}
+const agent = new Agent(withSupermemory(
+  { id: "my-assistant", model: openai("gpt-4o"), instructions: "..." },
+  {
+    containerTag: "user-123",
+    customId: "conv-456",
+    verbose: true,
+  }
+))
+
+// Console output:
+// [supermemory] Starting memory search { containerTag: "user-123", mode: "profile" }
+// [supermemory] Found 5 memories
+// [supermemory] Injected memories into system prompt { length: 1523 }
+```
+
+***
+
+## Working with Existing Processors
+
+The wrapper correctly merges with existing processors in the config:
+
+```typescript theme={null}
+// Supermemory processors are merged correctly:
+// - Input: [supermemory, myLogging] (supermemory runs first)
+// - Output: [myAnalytics, supermemory] (supermemory runs last)
+const agent = new Agent(withSupermemory(
+  {
+    id: "my-assistant",
+    model: openai("gpt-4o"),
+    inputProcessors: [myLoggingProcessor],
+    outputProcessors: [myAnalyticsProcessor],
+  },
+  {
+    containerTag: "user-123",
+    customId: "conv-456",
+  }
+))
+```
+
+***
+
+## API Reference
+
+### `withSupermemory`
+
+Enhances a Mastra agent config with memory capabilities.
+
+```typescript theme={null}
+function withSupermemory<T extends AgentConfig>(
+  config: T,
+  options: SupermemoryMastraOptions
+): T
+```
+
+**Parameters:**
+
+* `config` - The Mastra agent configuration object
+* `options` - Configuration options (includes required `containerTag` and `customId`)
+
+**Returns:** Enhanced config with Supermemory processors injected
+
+### `createSupermemoryProcessor`
+
+Creates an input processor for memory injection.
+
+```typescript theme={null}
+function createSupermemoryProcessor(
+  options: SupermemoryMastraOptions
+): SupermemoryInputProcessor
+```
+
+### `createSupermemoryOutputProcessor`
+
+Creates an output processor for conversation saving.
+
+```typescript theme={null}
+function createSupermemoryOutputProcessor(
+  options: SupermemoryMastraOptions
+): SupermemoryOutputProcessor
+```
+
+### `createSupermemoryProcessors`
+
+Creates both processors with shared configuration.
+
+```typescript theme={null}
+function createSupermemoryProcessors(
+  options: SupermemoryMastraOptions
+): {
+  input: SupermemoryInputProcessor
+  output: SupermemoryOutputProcessor
+}
+```
+
+### `SupermemoryMastraOptions`
+
+```typescript theme={null}
+interface SupermemoryMastraOptions {
+  containerTag: string         // Required: User/container tag for scoping memories
+  customId: string             // Required: Groups messages for contextual memory generation
+  apiKey?: string
+  baseUrl?: string
+  mode?: "profile" | "query" | "full"
+  addMemory?: "always" | "never"  // Default: "always"
+  verbose?: boolean
+  promptTemplate?: (data: MemoryPromptData) => string
+}
+```
+
+***
+
+## Environment Variables
+
+```bash theme={null}
+SUPERMEMORY_API_KEY=your_supermemory_key
+```
+
+***
+
+## Error Handling
+
+Processors gracefully handle errors without breaking the agent:
+
+* **API errors** - Logged and skipped; agent continues without memories
+* **Missing API key** - Throws immediately with helpful error message
+
+```typescript theme={null}
+// Missing API key throws immediately
+const agent = new Agent(withSupermemory(
+  { id: "my-assistant", model: openai("gpt-4o"), instructions: "..." },
+  {
+    containerTag: "user-123",
+    customId: "conv-456",
+    apiKey: undefined,  // Will check SUPERMEMORY_API_KEY env
+  }
+))
+// Error: SUPERMEMORY_API_KEY is not set
+```
+
+***
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Vercel AI SDK" icon="triangle" href="/integrations/ai-sdk">
+    Use with Vercel AI SDK for streamlined development
+  </Card>
+
+  <Card title="User Profiles" icon="user" href="/user-profiles">
+    Learn about user profile management
+  </Card>
+</CardGroup>

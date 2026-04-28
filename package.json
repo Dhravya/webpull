@@ -1,0 +1,23 @@
+{
+	"name": "webpull",
+	"version": "0.1.1",
+	"description": "Pull any public docs site into local markdown files",
+	"module": "src/index.ts",
+	"type": "module",
+	"bin": {
+		"webpull": "bin/webpull"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.13",
+		"@types/bun": "latest",
+		"@types/node": "^25.6.0"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"dependencies": {
+		"defuddle": "^0.18.1",
+		"effect": "^3.21.2",
+		"linkedom": "^0.18.12"
+	}
+}
