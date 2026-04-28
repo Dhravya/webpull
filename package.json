@@ -1,6 +1,6 @@
 {
 	"name": "webpull",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Pull any public docs site into local markdown files",
 	"module": "src/index.ts",
 	"type": "module",
