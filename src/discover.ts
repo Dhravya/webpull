@@ -83,19 +83,25 @@ const extractNav = (base: URL, html: string) =>
 
 // --- Crawl ---
 
-const extractLinks = (html: string, base: URL, visited: Set<string>) => {
+const extractLinks = (html: string, base: URL, visited: Set<string>, scope: string) => {
 	const out: string[] = []
 	for (const m of html.matchAll(/href=["'](.*?)["']/gi)) {
 		try {
 			const r = new URL(m[1]!, base)
 			r.hash = r.search = ""
-			if (r.hostname === base.hostname && !IGNORED.test(r.pathname) && !visited.has(r.href)) out.push(r.href)
+			if (
+				r.hostname === base.hostname &&
+				r.pathname.startsWith(scope) &&
+				!IGNORED.test(r.pathname) &&
+				!visited.has(r.href)
+			)
+				out.push(r.href)
 		} catch {}
 	}
 	return [...new Set(out)]
 }
 
-const crawl = (base: URL, max: number) =>
+const crawl = (base: URL, max: number, scope: string) =>
 	Effect.gen(function* () {
 		const visited = new Set<string>()
 		const queue = [base.href]
@@ -111,7 +117,7 @@ const crawl = (base: URL, max: number) =>
 						Effect.map((r) => {
 							if (!r?.text.includes("</html")) return []
 							found.push(r.url)
-							return extractLinks(r.text, base, visited)
+							return extractLinks(r.text, base, visited, scope)
 						}),
 					),
 				),
@@ -219,5 +225,5 @@ export const discover = (baseUrl: string, max: number) =>
 		}
 
 		process.stderr.write("  Falling back to link crawling...\n")
-		return yield* crawl(actual, max)
+		return yield* crawl(actual, max, scope)
 	})
