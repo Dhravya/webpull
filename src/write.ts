@@ -2,15 +2,11 @@ import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { Effect } from "effect"
 import type { Page } from "./convert"
+import { urlToOutputPath } from "./path"
 
-export const write = (page: Page, outDir: string) =>
+export const write = (page: Page, outDir: string, outputPath = urlToOutputPath(page.url)) =>
 	Effect.gen(function* () {
-		let p = new URL(page.url).pathname
-		if (p.endsWith("/")) p += "index"
-		p = p.replace(/\.html?$/, "").replace(/^\//, "")
-		if (!p.endsWith(".md")) p += ".md"
-
-		const full = join(outDir, p)
+		const full = join(outDir, outputPath)
 		yield* Effect.tryPromise({
 			try: () => mkdir(dirname(full), { recursive: true }),
 			catch: () => new Error(`mkdir: ${full}`),

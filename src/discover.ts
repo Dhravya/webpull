@@ -1,5 +1,6 @@
 import { Effect } from "effect"
-import { parseHTML } from "linkedom"
+import { DOMParser, parseHTML } from "linkedom"
+import { fetchText } from "./fetcher"
 
 const IGNORED = /\.(png|jpg|jpeg|gif|svg|webp|ico|pdf|zip|tar|gz|mp4|mp3|woff2?|ttf|eot|css|js|json|xml|rss|atom)$/i
 
@@ -16,19 +17,33 @@ const NAV_SELECTORS = [
 
 // --- Core fetch ---
 
-const tryFetch = (url: string): Effect.Effect<{ text: string; url: string } | null> =>
+interface DiscoverOptions {
+	headers?: Record<string, string>
+	maxDepth?: number
+	timeoutMs?: number
+	userAgent?: string
+}
+
+const tryFetch = (url: string, options: DiscoverOptions = {}): Effect.Effect<{ text: string; url: string } | null> =>
 	Effect.tryPromise(() =>
-		fetch(url, { redirect: "follow" }).then(async (r) => (r.ok ? { text: await r.text(), url: r.url } : null)),
+		fetchText(url, {
+			headers: options.headers,
+			timeoutMs: options.timeoutMs,
+			userAgent: options.userAgent,
+		}).then((r) => (r.ok ? { text: r.text, url: r.url } : null)),
 	).pipe(Effect.catchAll(() => Effect.succeed(null)))
 
 // --- Sitemap ---
 
-const parseLocs = (xml: string) => [...xml.matchAll(/<loc>\s*(.*?)\s*<\/loc>/gi)].map((m) => m[1]!.trim())
+export const parseLocs = (xml: string) => {
+	const document = new DOMParser().parseFromString(xml, "text/xml")
+	return [...document.querySelectorAll("loc")].map((loc) => loc.textContent.trim()).filter(Boolean)
+}
 
-const fetchSitemap = (url: string, depth = 0): Effect.Effect<string[], never, never> => {
+const fetchSitemap = (url: string, depth = 0, options: DiscoverOptions = {}): Effect.Effect<string[], never, never> => {
 	if (depth > 3) return Effect.succeed([])
 	return Effect.gen(function* () {
-		const r = yield* tryFetch(url)
+		const r = yield* tryFetch(url, options)
 		if (!r?.text.includes("<")) return []
 
 		const locs = parseLocs(r.text)
@@ -36,7 +51,7 @@ const fetchSitemap = (url: string, depth = 0): Effect.Effect<string[], never, ne
 
 		if (isIndex) {
 			const nested = yield* Effect.all(
-				locs.map((u) => fetchSitemap(u, depth + 1)),
+				locs.map((u) => fetchSitemap(u, depth + 1, options)),
 				{ concurrency: "unbounded" },
 			)
 			return nested.flat()
@@ -45,14 +60,14 @@ const fetchSitemap = (url: string, depth = 0): Effect.Effect<string[], never, ne
 	})
 }
 
-const sitemapFromRobots = (origin: string) =>
+const sitemapFromRobots = (origin: string, options: DiscoverOptions = {}) =>
 	Effect.gen(function* () {
-		const r = yield* tryFetch(`${origin}/robots.txt`)
+		const r = yield* tryFetch(`${origin}/robots.txt`, options)
 		if (!r) return []
 		const urls = (r.text.match(/^Sitemap:\s*(.+)$/gim) ?? []).map((l) => l.replace(/^Sitemap:\s*/i, "").trim())
 		if (!urls.length) return []
 		const results = yield* Effect.all(
-			urls.map((u) => fetchSitemap(u)),
+			urls.map((u) => fetchSitemap(u, 0, options)),
 			{ concurrency: "unbounded" },
 		)
 		return results.flat()
@@ -83,11 +98,14 @@ const extractNav = (base: URL, html: string) =>
 
 // --- Crawl ---
 
-const extractLinks = (html: string, base: URL, visited: Set<string>, scope: string) => {
+export const extractLinks = (html: string, base: URL, visited: Set<string>, scope = "/") => {
+	const { document } = parseHTML(html)
 	const out: string[] = []
-	for (const m of html.matchAll(/href=["'](.*?)["']/gi)) {
+	for (const link of document.querySelectorAll("a[href]")) {
+		const href = link.getAttribute("href")
+		if (!href || href.startsWith("#") || href.startsWith("javascript:") || href.startsWith("mailto:")) continue
 		try {
-			const r = new URL(m[1]!, base)
+			const r = new URL(href, base)
 			r.hash = r.search = ""
 			if (
 				r.hostname === base.hostname &&
@@ -101,32 +119,35 @@ const extractLinks = (html: string, base: URL, visited: Set<string>, scope: stri
 	return [...new Set(out)]
 }
 
-const crawl = (base: URL, max: number, scope: string) =>
+const crawl = (base: URL, max: number, scope: string, options: DiscoverOptions = {}) =>
 	Effect.gen(function* () {
 		const visited = new Set<string>()
-		const queue = [base.href]
+		const queue = [{ depth: 0, url: base.href }]
 		const found: string[] = []
 
 		while (queue.length > 0 && found.length < max) {
-			const batch = queue.splice(0, Math.min(20, max - found.length)).filter((u) => !visited.has(u))
-			for (const u of batch) visited.add(u)
+			const batch = queue.splice(0, Math.min(20, max - found.length)).filter((item) => !visited.has(item.url))
+			for (const item of batch) visited.add(item.url)
 
 			const results = yield* Effect.all(
-				batch.map((url) =>
-					tryFetch(url).pipe(
+				batch.map((item) =>
+					tryFetch(item.url, options).pipe(
 						Effect.map((r) => {
-							if (!r?.text.includes("</html")) return []
+							if (!r?.text.includes("</html")) return { depth: item.depth, links: [] }
 							found.push(r.url)
-							return extractLinks(r.text, base, visited, scope)
+							if (options.maxDepth !== undefined && item.depth >= options.maxDepth) {
+								return { depth: item.depth, links: [] }
+							}
+							return { depth: item.depth, links: extractLinks(r.text, base, visited, scope) }
 						}),
 					),
 				),
 				{ concurrency: 20 },
 			)
 
-			for (const links of results) {
+			for (const { depth, links } of results) {
 				for (const link of links) {
-					if (!visited.has(link) && found.length + queue.length < max) queue.push(link)
+					if (!visited.has(link) && found.length + queue.length < max) queue.push({ depth: depth + 1, url: link })
 				}
 			}
 		}
@@ -162,20 +183,22 @@ const filterAndDedupe = (urls: string[], hosts: Set<string>, scope: string, max:
 
 // --- Main ---
 
-export const discover = (baseUrl: string, max: number) =>
+export const discover = (baseUrl: string, max: number, options: DiscoverOptions = {}) =>
 	Effect.gen(function* () {
 		const res = yield* Effect.tryPromise({
-			try: () => fetch(baseUrl, { redirect: "follow" }),
+			try: () =>
+				fetchText(baseUrl, {
+					headers: options.headers,
+					timeoutMs: options.timeoutMs,
+					userAgent: options.userAgent,
+				}),
 			catch: () => new Error(`Failed to fetch ${baseUrl}`),
 		})
 		if (!res.ok) return yield* Effect.fail(new Error(`HTTP ${res.status}: ${baseUrl}`))
 
 		const actual = new URL(res.url)
 		const original = new URL(baseUrl)
-		const html = yield* Effect.tryPromise({
-			try: () => res.text(),
-			catch: () => new Error("Failed to read response"),
-		})
+		const html = res.text
 
 		if (actual.href !== original.href) process.stderr.write(`  Resolved to ${actual.href}\n`)
 
@@ -187,10 +210,10 @@ export const discover = (baseUrl: string, max: number) =>
 
 		const strategies: Effect.Effect<string[]>[] = []
 		for (const o of origins) {
-			strategies.push(sitemapFromRobots(o))
+			strategies.push(sitemapFromRobots(o, options))
 			for (const bp of basePaths) {
 				for (const name of ["sitemap.xml", "sitemap_index.xml", "sitemap-0.xml"]) {
-					strategies.push(fetchSitemap(`${o}${bp}${name}`))
+					strategies.push(fetchSitemap(`${o}${bp}${name}`, 0, options))
 				}
 			}
 		}
@@ -225,5 +248,5 @@ export const discover = (baseUrl: string, max: number) =>
 		}
 
 		process.stderr.write("  Falling back to link crawling...\n")
-		return yield* crawl(actual, max, scope)
+		return yield* crawl(actual, max, scope, options)
 	})

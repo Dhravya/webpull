@@ -1,0 +1,46 @@
+import { describe, expect, test } from "bun:test"
+import { extractLinks, parseLocs } from "./discover"
+
+describe("parseLocs", () => {
+	test("parses XML loc elements and decodes entities", () => {
+		expect(
+			parseLocs(`
+				<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+					<url><loc>https://example.com/docs/a&amp;b</loc></url>
+					<url><loc>https://example.com/docs/c</loc></url>
+				</urlset>
+			`),
+		).toEqual(["https://example.com/docs/a&b", "https://example.com/docs/c"])
+	})
+})
+
+describe("extractLinks", () => {
+	test("extracts same-host anchor hrefs and ignores script text", () => {
+		const html = `
+			<html>
+				<body>
+					<a href="/docs/a">A</a>
+					<a href="https://other.example/docs/b">B</a>
+					<script>const x = '<a href="/docs/from-script">bad</a>'</script>
+				</body>
+			</html>
+		`
+
+		expect(extractLinks(html, new URL("https://example.com/docs/"), new Set())).toEqual(["https://example.com/docs/a"])
+	})
+
+	test("skips visited, hash-only, mailto, javascript, and ignored assets", () => {
+		const html = `
+			<a href="#top">Top</a>
+			<a href="mailto:test@example.com">Mail</a>
+			<a href="javascript:void(0)">JS</a>
+			<a href="/docs/seen">Seen</a>
+			<a href="/docs/logo.png">Logo</a>
+			<a href="/docs/new">New</a>
+		`
+
+		expect(
+			extractLinks(html, new URL("https://example.com/docs/"), new Set(["https://example.com/docs/seen"])),
+		).toEqual(["https://example.com/docs/new"])
+	})
+})
