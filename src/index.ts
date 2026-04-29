@@ -41,11 +41,15 @@ const program = Effect.gen(function* () {
 		userAgent: config.userAgent,
 	})
 	let interrupted = false
+	let resolveInterrupted: (() => void) | undefined
+	const interruptedPromise = new Promise<void>((resolve) => {
+		resolveInterrupted = resolve
+	})
 	const onSigint = () => {
 		interrupted = true
 		pool.terminate()
 		process.stderr.write("\n  Interrupted. Stopping workers...\n")
-		process.exit(130)
+		resolveInterrupted?.()
 	}
 	process.once("SIGINT", onSigint)
 
@@ -67,10 +71,17 @@ const program = Effect.gen(function* () {
 			process.stderr.write("  No pages found.\n")
 			process.exit(1)
 		}
-		const outputPaths = new OutputPathAllocator()
-		const planned = urls.map((url) => ({ url, outputPath: outputPaths.allocate(url) }))
 		const manifestPath = config.manifestFile ?? defaultManifestPath(config.out)
 		const manifest = readManifest(manifestPath)
+		const outputPaths = new OutputPathAllocator()
+		for (const url of urls) {
+			const outputPath = manifest.entries[url]?.outputPath
+			if (outputPath) outputPaths.reserve(outputPath)
+		}
+		const planned = urls.map((url) => ({
+			url,
+			outputPath: manifest.entries[url]?.outputPath ?? outputPaths.allocate(url),
+		}))
 		if (config.diff) {
 			const diff = manifestDiff(
 				planned.map((page) => page.url),
@@ -84,7 +95,8 @@ const program = Effect.gen(function* () {
 			? planned
 					.filter((page) => {
 						const entry = manifest.entries[page.url]
-						const fileExists = existsSync(join(config.out, page.outputPath))
+						const outputPath = entry?.outputPath ?? page.outputPath
+						const fileExists = existsSync(join(config.out, outputPath))
 						if (config.changedOnly) return entry?.ok && fileExists
 						return fileExists
 					})
@@ -137,8 +149,8 @@ const program = Effect.gen(function* () {
 			ui.render({ total, ok, err, elapsed: (now - tDisc) / 1000, workerStates, recentFiles })
 		}
 
-		yield* Effect.tryPromise(() =>
-			pool.pullAll(
+		yield* Effect.tryPromise(() => {
+			const pullPromise = pool.pullAll(
 				pages.map((page) => page.url),
 				(idx, workerId) => {
 					workerMap.set(idx, workerId)
@@ -218,9 +230,9 @@ const program = Effect.gen(function* () {
 					}
 					tick()
 				},
-			),
-		)
-		if (interrupted) return
+			)
+			return Promise.race([pullPromise, interruptedPromise])
+		})
 		yield* Effect.tryPromise(() => Promise.all(writes).then(() => undefined))
 
 		ui.render({ total, ok, err, elapsed: (performance.now() - tDisc) / 1000, workerStates, recentFiles })
@@ -283,6 +295,10 @@ const program = Effect.gen(function* () {
 			)
 			if (err) process.stderr.write(`  \x1b[31m${err} failed\x1b[0m\n`)
 			process.stderr.write("\n")
+		}
+		if (interrupted) {
+			process.exitCode = 130
+			return
 		}
 	} finally {
 		process.off("SIGINT", onSigint)

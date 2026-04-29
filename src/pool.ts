@@ -49,6 +49,10 @@ export class WorkerPool {
 			let dispatched = 0
 			let completed = 0
 			const total = urls.length
+			if (total === 0) {
+				resolve()
+				return
+			}
 
 			const finish = () => {
 				if (completed === total) resolve()

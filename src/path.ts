@@ -2,7 +2,12 @@ import { basename, dirname, extname, join } from "node:path"
 
 export const urlToOutputPath = (url: string): string => {
 	const parsed = new URL(url)
-	let pathname = decodeURIComponent(parsed.pathname)
+	let pathname: string
+	try {
+		pathname = decodeURIComponent(parsed.pathname)
+	} catch {
+		pathname = parsed.pathname
+	}
 
 	if (!pathname || pathname === "/") pathname = "/index"
 	if (pathname.endsWith("/")) pathname += "index"
@@ -24,6 +29,10 @@ const addCollisionSuffix = (path: string, index: number) => {
 
 export class OutputPathAllocator {
 	private readonly used = new Set<string>()
+
+	reserve(path: string) {
+		this.used.add(path)
+	}
 
 	allocate(url: string): string {
 		const base = urlToOutputPath(url)

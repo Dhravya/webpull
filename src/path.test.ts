@@ -16,6 +16,10 @@ describe("urlToOutputPath", () => {
 	test("ignores query strings and fragments for the default path", () => {
 		expect(urlToOutputPath("https://example.com/docs/start?utm_source=x#intro")).toBe("docs/start.md")
 	})
+
+	test("keeps malformed percent-encoded paths crawl-safe", () => {
+		expect(urlToOutputPath("https://example.com/%E0%A4%A")).toBe("%E0%A4%A.md")
+	})
 })
 
 describe("OutputPathAllocator", () => {
@@ -32,5 +36,12 @@ describe("OutputPathAllocator", () => {
 
 		expect(paths.allocate("https://example.com/docs/foo")).toBe("docs/foo.md")
 		expect(paths.allocate("https://example.com/docs/foo.html")).toBe("docs/foo_2.md")
+	})
+
+	test("reserves manifest paths before allocating new collisions", () => {
+		const paths = new OutputPathAllocator()
+
+		paths.reserve("foo.md")
+		expect(paths.allocate("https://example.com/foo.html")).toBe("foo_2.md")
 	})
 })
