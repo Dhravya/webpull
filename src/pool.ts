@@ -3,26 +3,39 @@ export interface WorkerResult {
 	url?: string
 	title?: string
 	content?: string
+	contentType?: string
+	description?: string
 	error?: string
+	sourceUrl?: string
+	status?: number
 }
 
 const WORKER_PATH = new URL("./worker.ts", import.meta.url).href
 
 interface WorkerPoolOptions {
+	convertTimeoutMs?: number
+	delayMs?: number
 	headers?: Record<string, string>
 	jobTimeoutMs?: number
+	respectNoindex?: boolean
 	userAgent?: string
 }
 
 export class WorkerPool {
 	private workers: Worker[]
+	private readonly convertTimeoutMs: number
+	private readonly delayMs: number
 	private readonly headers: Record<string, string> | undefined
 	private readonly jobTimeoutMs: number
+	private readonly respectNoindex: boolean
 	private readonly userAgent: string | undefined
 
 	constructor(size: number, options: WorkerPoolOptions = {}) {
+		this.convertTimeoutMs = options.convertTimeoutMs ?? 0
+		this.delayMs = options.delayMs ?? 0
 		this.headers = options.headers
 		this.jobTimeoutMs = options.jobTimeoutMs ?? 30_000
+		this.respectNoindex = options.respectNoindex ?? false
 		this.userAgent = options.userAgent
 		this.workers = Array.from({ length: size }, () => new Worker(WORKER_PATH))
 	}
@@ -96,7 +109,10 @@ export class WorkerPool {
 				worker.addEventListener("messageerror", onMessageError)
 				worker.postMessage({
 					url: urls[idx],
+					convertTimeoutMs: this.convertTimeoutMs,
+					delayMs: this.delayMs,
 					headers: this.headers,
+					respectNoindex: this.respectNoindex,
 					timeoutMs: this.jobTimeoutMs,
 					userAgent: this.userAgent,
 				})

@@ -18,8 +18,10 @@ const NAV_SELECTORS = [
 // --- Core fetch ---
 
 interface DiscoverOptions {
+	delayMs?: number
 	headers?: Record<string, string>
 	maxDepth?: number
+	respectRobots?: boolean
 	timeoutMs?: number
 	userAgent?: string
 }
@@ -27,6 +29,7 @@ interface DiscoverOptions {
 const tryFetch = (url: string, options: DiscoverOptions = {}): Effect.Effect<{ text: string; url: string } | null> =>
 	Effect.tryPromise(() =>
 		fetchText(url, {
+			delayMs: options.delayMs,
 			headers: options.headers,
 			timeoutMs: options.timeoutMs,
 			userAgent: options.userAgent,
@@ -38,6 +41,42 @@ const tryFetch = (url: string, options: DiscoverOptions = {}): Effect.Effect<{ t
 export const parseLocs = (xml: string) => {
 	const document = new DOMParser().parseFromString(xml, "text/xml")
 	return [...document.querySelectorAll("loc")].map((loc) => loc.textContent.trim()).filter(Boolean)
+}
+
+export interface RobotsRules {
+	crawlDelayMs?: number
+	disallow: string[]
+}
+
+export const parseRobots = (text: string): RobotsRules => {
+	const rules: RobotsRules = { disallow: [] }
+	let applies = false
+
+	for (const rawLine of text.split(/\r?\n/)) {
+		const line = rawLine.replace(/#.*/, "").trim()
+		if (!line) continue
+		const separator = line.indexOf(":")
+		if (separator === -1) continue
+		const field = line.slice(0, separator).trim().toLowerCase()
+		const value = line.slice(separator + 1).trim()
+
+		if (field === "user-agent") {
+			applies = value === "*"
+		} else if (applies && field === "disallow" && value) {
+			rules.disallow.push(value)
+		} else if (applies && field === "crawl-delay") {
+			const seconds = Number(value)
+			if (Number.isFinite(seconds) && seconds >= 0) rules.crawlDelayMs = seconds * 1000
+		}
+	}
+
+	return rules
+}
+
+export const isAllowedByRobots = (url: string, rules?: RobotsRules) => {
+	if (!rules) return true
+	const pathname = new URL(url).pathname
+	return !rules.disallow.some((rule) => pathname.startsWith(rule))
 }
 
 const fetchSitemap = (url: string, depth = 0, options: DiscoverOptions = {}): Effect.Effect<string[], never, never> => {
@@ -119,14 +158,16 @@ export const extractLinks = (html: string, base: URL, visited: Set<string>, scop
 	return [...new Set(out)]
 }
 
-const crawl = (base: URL, max: number, scope: string, options: DiscoverOptions = {}) =>
+const crawl = (base: URL, max: number, scope: string, options: DiscoverOptions = {}, robots?: RobotsRules) =>
 	Effect.gen(function* () {
 		const visited = new Set<string>()
 		const queue = [{ depth: 0, url: base.href }]
 		const found: string[] = []
 
 		while (queue.length > 0 && found.length < max) {
-			const batch = queue.splice(0, Math.min(20, max - found.length)).filter((item) => !visited.has(item.url))
+			const batch = queue
+				.splice(0, Math.min(20, max - found.length))
+				.filter((item) => !visited.has(item.url) && isAllowedByRobots(item.url, robots))
 			for (const item of batch) visited.add(item.url)
 
 			const results = yield* Effect.all(
@@ -188,6 +229,7 @@ export const discover = (baseUrl: string, max: number, options: DiscoverOptions 
 		const res = yield* Effect.tryPromise({
 			try: () =>
 				fetchText(baseUrl, {
+					delayMs: options.delayMs,
 					headers: options.headers,
 					timeoutMs: options.timeoutMs,
 					userAgent: options.userAgent,
@@ -207,13 +249,20 @@ export const discover = (baseUrl: string, max: number, options: DiscoverOptions 
 
 		const origins = [...new Set([original.origin, actual.origin])]
 		const basePaths = [...new Set([actual.pathname.replace(/\/[^/]*$/, "/"), "/"])]
+		const robots = options.respectRobots
+			? parseRobots((yield* tryFetch(`${actual.origin}/robots.txt`, options))?.text ?? "")
+			: undefined
+		const crawlOptions = {
+			...options,
+			delayMs: Math.max(options.delayMs ?? 0, robots?.crawlDelayMs ?? 0),
+		}
 
 		const strategies: Effect.Effect<string[]>[] = []
 		for (const o of origins) {
-			strategies.push(sitemapFromRobots(o, options))
+			strategies.push(sitemapFromRobots(o, crawlOptions))
 			for (const bp of basePaths) {
 				for (const name of ["sitemap.xml", "sitemap_index.xml", "sitemap-0.xml"]) {
-					strategies.push(fetchSitemap(`${o}${bp}${name}`, 0, options))
+					strategies.push(fetchSitemap(`${o}${bp}${name}`, 0, crawlOptions))
 				}
 			}
 		}
@@ -248,5 +297,5 @@ export const discover = (baseUrl: string, max: number, options: DiscoverOptions 
 		}
 
 		process.stderr.write("  Falling back to link crawling...\n")
-		return yield* crawl(actual, max, scope, options)
+		return yield* crawl(actual, max, scope, crawlOptions, robots)
 	})

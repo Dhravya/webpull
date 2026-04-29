@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { extractLinks, parseLocs } from "./discover"
+import { extractLinks, isAllowedByRobots, parseLocs, parseRobots } from "./discover"
 
 describe("parseLocs", () => {
 	test("parses XML loc elements and decodes entities", () => {
@@ -11,6 +11,26 @@ describe("parseLocs", () => {
 				</urlset>
 			`),
 		).toEqual(["https://example.com/docs/a&b", "https://example.com/docs/c"])
+	})
+})
+
+describe("robots helpers", () => {
+	test("parses wildcard disallow and crawl delay", () => {
+		expect(
+			parseRobots(`
+				User-agent: other
+				Disallow: /ignored
+				User-agent: *
+				Disallow: /private
+				Crawl-delay: 2
+			`),
+		).toEqual({ disallow: ["/private"], crawlDelayMs: 2000 })
+	})
+
+	test("checks path prefixes against disallow rules", () => {
+		const rules = parseRobots("User-agent: *\nDisallow: /private")
+		expect(isAllowedByRobots("https://example.com/docs", rules)).toBe(true)
+		expect(isAllowedByRobots("https://example.com/private/page", rules)).toBe(false)
 	})
 })
 
