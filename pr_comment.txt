@@ -1,0 +1,11 @@
+@vorflux All 7 issues have been successfully addressed and pushed in the latest commit:
+
+1. **[P1] Race condition:** Write promises are now explicitly collected and awaited before running `transformToAIMemory`.
+2. **[P1] Multi-page paths & bleeding:** Deduplication logic added to tree builder to prevent path collisions. Page headings (`# ${title}`) are now prepended when combining markdown files to maintain page boundaries.
+3. **[P2] Missing Embeddings:** Added a `--with-embeddings` flag that dynamically generates and stores semantic embeddings. Added fallback warnings for queries made without them. 
+4. **[P2] Import paths:** Added the `"exports"` field to `package.json`.
+5. **[P2] README examples:** Fixed type (`question:`) and added `await` to `routeQuery` calls in the documentation.
+6. **[P2] Relative paths:** Updated `examples/chatbot.ts` to use `import.meta.dir` for stable path resolution.
+7. **[P2] Production dependencies:** Moved `@google/genai` and `openai` to `devDependencies` in `package.json`.
+
+Tested successfully with `bun run --bun tsc --noEmit` and `bun build src/index.ts --target=bun`. Ready for re-review!
