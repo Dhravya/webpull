@@ -134,7 +134,7 @@ const program = Effect.gen(function* () {
 						const parsedUrl = new URL(finalUrl)
 						let filepath = parsedUrl.pathname
 						// Handle hash-routed URLs (e.g. #/page/export -> page/export)
-						if (parsedUrl.hash && parsedUrl.hash.length > 2) {
+						if (parsedUrl.hash && parsedUrl.hash.length > 1) {
 							filepath = parsedUrl.hash.replace(/^#\/?/, "/")
 						}
 						if (filepath.endsWith("/")) filepath += "index"

@@ -8,7 +8,7 @@ export const write = (page: Page, outDir: string) =>
 		const parsed = new URL(page.url)
 		let p = parsed.pathname
 		// Handle hash-routed URLs (e.g. #/page/export -> /page/export)
-		if (parsed.hash && parsed.hash.length > 2) {
+		if (parsed.hash && parsed.hash.length > 1) {
 			p = parsed.hash.replace(/^#\/?/, "/")
 		}
 		if (p.endsWith("/")) p += "index"

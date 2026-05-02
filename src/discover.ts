@@ -201,10 +201,11 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 						hashLinks.push(base.origin + base.pathname + m[1])
 					}
 				}
-				const unique = [...new Set(hashLinks)].slice(0, max)
+				const deduped = [...new Set(hashLinks)]
+				// Always include the originally requested URL
+				if (!deduped.includes(fullUrl)) deduped.unshift(fullUrl)
+				const unique = deduped.slice(0, max)
 				if (unique.length > 0) {
-					// Always include the originally requested URL
-					if (!unique.includes(fullUrl)) unique.unshift(fullUrl)
 					process.stderr.write(`  Found ${unique.length} hash-routed pages\n`)
 					return unique
 				}
