@@ -10,21 +10,21 @@ function extractPaths(code: string): string[] {
 	const paths: string[] = []
 	let m: RegExpExecArray | null
 
-	// Match path: "/docs/foo" or path: '/docs/foo' or path:            
+	// Match path: "/docs/foo" or path: '/docs/foo' or path:
 	const pathRegex = /path:\s*["'\x60](\/[^"'\x60\s]{1,200})["'\x60]/g
-	while ((m = pathRegex.exec(code)) !== null) {
+	for (m = pathRegex.exec(code); m !== null; m = pathRegex.exec(code)) {
 		if (m[1]) paths.push(m[1])
 	}
 
 	// Match to: "/docs/foo" or to="/docs/foo" (JSX link props)
 	const toRegex = /to[:=]\s*["'\x60](\/[^"'\x60\s]{1,200})["'\x60]/g
-	while ((m = toRegex.exec(code)) !== null) {
+	for (m = toRegex.exec(code); m !== null; m = toRegex.exec(code)) {
 		if (m[1]) paths.push(m[1])
 	}
 
 	// Match href="/docs/foo" patterns (but not assets)
 	const hrefRegex = /href[:=]\s*["'\x60](\/[^"'\x60\s]{1,200})["'\x60]/g
-	while ((m = hrefRegex.exec(code)) !== null) {
+	for (m = hrefRegex.exec(code); m !== null; m = hrefRegex.exec(code)) {
 		if (m[1]) paths.push(m[1])
 	}
 

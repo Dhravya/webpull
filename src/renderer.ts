@@ -1,4 +1,4 @@
-import { chromium, type Browser, type BrowserContext } from "playwright"
+import { type Browser, type BrowserContext, chromium } from "playwright"
 
 let browser: Browser | null = null
 let context: BrowserContext | null = null
@@ -12,9 +12,7 @@ export async function launchBrowser(): Promise<void> {
 		})
 	} catch (err: any) {
 		if (err?.message?.includes("Executable doesn't exist") || err?.message?.includes("browserType.launch")) {
-			process.stderr.write(
-				"\n  \x1b[31mError: Chromium not found. Run: npx playwright install chromium\x1b[0m\n\n",
-			)
+			process.stderr.write("\n  \x1b[31mError: Chromium not found. Run: npx playwright install chromium\x1b[0m\n\n")
 			process.exit(1)
 		}
 		throw err

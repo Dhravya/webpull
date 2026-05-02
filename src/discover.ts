@@ -2,7 +2,7 @@ import { Effect } from "effect"
 import { parseHTML } from "linkedom"
 import { isSPAShell } from "./detect"
 import { launchBrowser, renderPage } from "./renderer"
-import { extractRoutesFromBundles, extractJsBundleUrls } from "./routes"
+import { extractJsBundleUrls, extractRoutesFromBundles } from "./routes"
 import { getHeaders } from "./ua"
 
 const IGNORED = /\.(png|jpg|jpeg|gif|svg|webp|ico|pdf|zip|tar|gz|mp4|mp3|woff2?|ttf|eot|css|js|json|xml|rss|atom)$/i
@@ -22,7 +22,9 @@ const NAV_SELECTORS = [
 
 const tryFetch = (url: string): Effect.Effect<{ text: string; url: string } | null> =>
 	Effect.tryPromise(() =>
-		fetch(url, { redirect: "follow", headers: getHeaders() }).then(async (r) => (r.ok ? { text: await r.text(), url: r.url } : null)),
+		fetch(url, { redirect: "follow", headers: getHeaders() }).then(async (r) =>
+			r.ok ? { text: await r.text(), url: r.url } : null,
+		),
 	).pipe(Effect.catchAll(() => Effect.succeed(null)))
 
 // --- Sitemap ---
@@ -166,7 +168,6 @@ const filterAndDedupe = (urls: string[], hosts: Set<string>, scope: string, max:
 	return out.slice(0, max)
 }
 
-
 // --- SPA Discovery ---
 
 const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts: Set<string>) =>
@@ -174,7 +175,12 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 		process.stderr.write("  Detected SPA (JavaScript-rendered site)\n")
 
 		// Check for hash-based routing (e.g. #/page/foo)
-		const isHashRouter = base.hash.length > 1 || html.includes("HashRouter") || html.includes("createHashRouter") || html.includes("hash-router") || html.includes("#/page/")
+		const isHashRouter =
+			base.hash.length > 1 ||
+			html.includes("HashRouter") ||
+			html.includes("createHashRouter") ||
+			html.includes("hash-router") ||
+			html.includes("#/page/")
 		if (isHashRouter) {
 			process.stderr.write("  Hash-based routing detected, using browser to discover pages...\n")
 			const fullUrl = base.origin + base.pathname + (base.hash || "")
@@ -191,10 +197,7 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 				const hashLinks: string[] = []
 				const hrefMatches = rendered.html.matchAll(/href=["'](#[^"'\s]+)["']/gi)
 				for (const m of hrefMatches) {
-					if (m[1] && !m[1].startsWith("#/") === false) {
-						hashLinks.push(base.origin + base.pathname + m[1])
-					}
-					if (m[1]?.startsWith("#/")) {
+					if (m[1] && m[1].length > 1) {
 						hashLinks.push(base.origin + base.pathname + m[1])
 					}
 				}
@@ -202,14 +205,14 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 				if (unique.length > 0) {
 					// Always include the originally requested URL
 					if (!unique.includes(fullUrl)) unique.unshift(fullUrl)
-					process.stderr.write("  Found " + unique.length + " hash-routed pages\n")
+					process.stderr.write(`  Found ${unique.length} hash-routed pages\n`)
 					return unique
 				}
 
 				// Also try regular nav extraction from rendered content
 				const nav = yield* extractNav(new URL(rendered.url), rendered.html)
 				if (nav.length > 1) {
-					process.stderr.write("  Found " + nav.length + " pages from rendered navigation\n")
+					process.stderr.write(`  Found ${nav.length} pages from rendered navigation\n`)
 					return nav.slice(0, max)
 				}
 			}
@@ -221,7 +224,7 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 		// Strategy 1: Extract routes from JS bundles
 		const jsUrls = extractJsBundleUrls(html, base)
 		if (jsUrls.length > 0) {
-			process.stderr.write("  Scanning " + jsUrls.length + " JS bundle(s) for routes...\n")
+			process.stderr.write(`  Scanning ${jsUrls.length} JS bundle(s) for routes...\n`)
 			const routes = yield* Effect.tryPromise({
 				try: () => extractRoutesFromBundles(jsUrls, base, scope),
 				catch: () => new Error("Route extraction failed"),
@@ -230,7 +233,7 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 			if (routes.length > 0) {
 				const filtered = filterAndDedupe(routes, hosts, scope, max)
 				if (filtered.length > 0) {
-					process.stderr.write("  Found " + filtered.length + " pages from JS bundles\n")
+					process.stderr.write(`  Found ${filtered.length} pages from JS bundles\n`)
 					return filtered
 				}
 			}
@@ -251,7 +254,7 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 			if (nav.length > 1) {
 				const filtered = filterAndDedupe(nav, hosts, scope, max)
 				if (filtered.length > 0) {
-					process.stderr.write("  Found " + filtered.length + " pages from rendered navigation\n")
+					process.stderr.write(`  Found ${filtered.length} pages from rendered navigation\n`)
 					return filtered
 				}
 			}
@@ -260,7 +263,7 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 			const links = extractLinks(rendered.html, base, new Set(), scope)
 			const filtered = filterAndDedupe(links, hosts, scope, max)
 			if (filtered.length > 0) {
-				process.stderr.write("  Found " + filtered.length + " pages from rendered links\n")
+				process.stderr.write(`  Found ${filtered.length} pages from rendered links\n`)
 				return filtered
 			}
 		}

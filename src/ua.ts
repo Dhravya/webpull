@@ -22,7 +22,7 @@ export function getRandomUA(): string {
 export function getHeaders(): Record<string, string> {
 	return {
 		"User-Agent": getRandomUA(),
-		"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 		"Accept-Language": "en-US,en;q=0.9",
 		"Accept-Encoding": "gzip, deflate, br",
 		"Cache-Control": "no-cache",

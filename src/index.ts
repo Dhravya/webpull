@@ -3,10 +3,10 @@ import { cpus } from "node:os"
 import { resolve } from "node:path"
 import { Effect } from "effect"
 import { frontmatter } from "./convert"
-import { discover } from "./discover"
 import { isSPAShell } from "./detect"
-import { closeBrowser } from "./renderer"
+import { discover } from "./discover"
 import { WorkerPool } from "./pool"
+import { closeBrowser } from "./renderer"
 import { createUI } from "./ui"
 import { write } from "./write"
 
@@ -84,8 +84,9 @@ const program = Effect.gen(function* () {
 			workerCount = Math.min(workerCount, 4)
 		}
 
-		pool = new WorkerPool(workerCount)
-		if (needsBrowser) pool.useBrowser = true
+		const activePool = new WorkerPool(workerCount)
+		if (needsBrowser) activePool.useBrowser = true
+		pool = activePool
 
 		const tDisc = performance.now()
 		const total = urls.length
@@ -107,7 +108,7 @@ const program = Effect.gen(function* () {
 		}
 
 		yield* Effect.tryPromise(() =>
-			pool.pullAll(
+			activePool.pullAll(
 				urls,
 				(idx) => {
 					const slot = nextSlot++ % workerCount

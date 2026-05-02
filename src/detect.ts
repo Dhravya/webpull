@@ -25,10 +25,7 @@ export function isSPAShell(html: string): boolean {
 		/<div\s+id=["'][^"']+["']\s*>\s*<\/div>/i.test(bodyContent)
 
 	// Check for framework indicators in the full HTML
-	const hasFrameworkScript =
-		/type=["']module["']/i.test(html) ||
-		/__NEXT_DATA__/.test(html) ||
-		/__NUXT__/.test(html)
+	const hasFrameworkScript = /type=["']module["']/i.test(html) || /__NEXT_DATA__/.test(html) || /__NUXT__/.test(html)
 
 	return hasRootDiv && (textContent.length < 50 || hasFrameworkScript)
 }

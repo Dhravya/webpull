@@ -9,7 +9,7 @@ console.error = () => {}
 import { Defuddle } from "defuddle/node"
 import { parseHTML } from "linkedom"
 import { isSPAShell } from "./detect"
-import { renderPage, launchBrowser, isBrowserLaunched } from "./renderer"
+import { isBrowserLaunched, launchBrowser, renderPage } from "./renderer"
 import { getHeaders } from "./ua"
 
 declare const self: Worker
@@ -33,7 +33,7 @@ self.onmessage = async (e: MessageEvent<{ url: string; useBrowser?: boolean }>) 
 		const headers = { ...getHeaders(), Accept: "text/markdown" }
 		const res = await fetch(url, { redirect: "follow", headers })
 		if (!res.ok) {
-			self.postMessage({ ok: false, error: "HTTP " + res.status + ": " + url })
+			self.postMessage({ ok: false, error: `HTTP ${res.status}: ${url}` })
 			return
 		}
 
