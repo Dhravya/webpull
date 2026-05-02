@@ -5,7 +5,12 @@ import type { Page } from "./convert"
 
 export const write = (page: Page, outDir: string) =>
 	Effect.gen(function* () {
-		let p = new URL(page.url).pathname
+		const parsed = new URL(page.url)
+		let p = parsed.pathname
+		// Handle hash-routed URLs (e.g. #/page/export -> /page/export)
+		if (parsed.hash && parsed.hash.length > 2) {
+			p = parsed.hash.replace(/^#\/?/, "/")
+		}
 		if (p.endsWith("/")) p += "index"
 		p = p.replace(/\.html?$/, "").replace(/^\//, "")
 		if (!p.endsWith(".md")) p += ".md"

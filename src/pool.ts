@@ -10,9 +10,14 @@ const WORKER_PATH = new URL("./worker.ts", import.meta.url).href
 
 export class WorkerPool {
 	private workers: Worker[]
+	private _useBrowser = false
 
 	constructor(size: number) {
 		this.workers = Array.from({ length: size }, () => new Worker(WORKER_PATH))
+	}
+
+	set useBrowser(val: boolean) {
+		this._useBrowser = val
 	}
 
 	pullAll(
@@ -39,7 +44,7 @@ export class WorkerPool {
 				}
 
 				worker.addEventListener("message", onMessage)
-				worker.postMessage({ url: urls[idx] })
+				worker.postMessage({ url: urls[idx], useBrowser: this._useBrowser })
 			}
 
 			for (const w of this.workers) {

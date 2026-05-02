@@ -4,6 +4,8 @@ import { resolve } from "node:path"
 import { Effect } from "effect"
 import { frontmatter } from "./convert"
 import { discover } from "./discover"
+import { isSPAShell } from "./detect"
+import { closeBrowser } from "./renderer"
 import { WorkerPool } from "./pool"
 import { createUI } from "./ui"
 import { write } from "./write"
@@ -71,6 +73,16 @@ const program = Effect.gen(function* () {
 			process.exit(1)
 		}
 
+		// Detect if we need browser rendering for content extraction
+		const sampleHtml = yield* Effect.tryPromise({
+			try: () => fetch(config.url, { redirect: "follow" }).then((r) => r.text()),
+			catch: () => new Error("Failed to detect SPA"),
+		}).pipe(Effect.catchAll(() => Effect.succeed("")))
+		const needsBrowser = isSPAShell(sampleHtml)
+		if (needsBrowser) {
+			pool.useBrowser = true
+		}
+
 		const tDisc = performance.now()
 		const total = urls.length
 		const ui = createUI(config.url, config.out, workerCount)
@@ -114,7 +126,12 @@ const program = Effect.gen(function* () {
 							markdown: frontmatter(title, finalUrl) + (result.content ?? ""),
 						}
 
-						let filepath = new URL(finalUrl).pathname
+						const parsedUrl = new URL(finalUrl)
+						let filepath = parsedUrl.pathname
+						// Handle hash-routed URLs (e.g. #/page/export -> page/export)
+						if (parsedUrl.hash && parsedUrl.hash.length > 2) {
+							filepath = parsedUrl.hash.replace(/^#\/?/, "/")
+						}
 						if (filepath.endsWith("/")) filepath += "index"
 						filepath = filepath.replace(/\.html?$/, "").replace(/^\//, "")
 						if (!filepath.endsWith(".md")) filepath += ".md"
@@ -145,7 +162,9 @@ const program = Effect.gen(function* () {
 	}
 })
 
-Effect.runPromise(program).catch((e) => {
-	console.error(e)
-	process.exit(1)
-})
+Effect.runPromise(program)
+	.catch((e) => {
+		console.error(e)
+		process.exit(1)
+	})
+	.finally(() => closeBrowser())
