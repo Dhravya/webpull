@@ -5,10 +5,20 @@ let context: BrowserContext | null = null
 
 export async function launchBrowser(): Promise<void> {
 	if (browser) return
-	browser = await chromium.launch({
-		headless: true,
-		args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-	})
+	try {
+		browser = await chromium.launch({
+			headless: true,
+			args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+		})
+	} catch (err: any) {
+		if (err?.message?.includes("Executable doesn't exist") || err?.message?.includes("browserType.launch")) {
+			process.stderr.write(
+				"\n  \x1b[31mError: Chromium not found. Run: npx playwright install chromium\x1b[0m\n\n",
+			)
+			process.exit(1)
+		}
+		throw err
+	}
 	context = await browser.newContext({
 		userAgent:
 			"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

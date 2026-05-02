@@ -6,7 +6,7 @@ export function isSPAShell(html: string): boolean {
 	const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)
 	if (!bodyMatch) return false
 
-	const bodyContent = bodyMatch[1]
+	const bodyContent = (bodyMatch[1] ?? "")
 		.replace(/<script[\s\S]*?<\/script>/gi, "")
 		.replace(/<link[^>]*>/gi, "")
 		.replace(/<style[\s\S]*?<\/style>/gi, "")

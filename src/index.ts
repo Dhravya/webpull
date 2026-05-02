@@ -61,8 +61,8 @@ const parseArgs = (args: string[]): Config => {
 const program = Effect.gen(function* () {
 	const config = parseArgs(process.argv.slice(2))
 	const t0 = performance.now()
-	const workerCount = Math.max(8, cpus().length * 2)
-	const pool = new WorkerPool(workerCount)
+	let workerCount = Math.max(8, cpus().length * 2)
+	let pool: WorkerPool | null = null
 
 	process.stderr.write(`\n  \x1b[1m⚡ webpull\x1b[0m \x1b[90m· discovering pages...\x1b[0m\n\n`)
 
@@ -80,8 +80,12 @@ const program = Effect.gen(function* () {
 		}).pipe(Effect.catchAll(() => Effect.succeed("")))
 		const needsBrowser = isSPAShell(sampleHtml)
 		if (needsBrowser) {
-			pool.useBrowser = true
+			// Limit concurrency to avoid spawning too many Chromium instances
+			workerCount = Math.min(workerCount, 4)
 		}
+
+		pool = new WorkerPool(workerCount)
+		if (needsBrowser) pool.useBrowser = true
 
 		const tDisc = performance.now()
 		const total = urls.length
@@ -158,7 +162,7 @@ const program = Effect.gen(function* () {
 		if (err) process.stderr.write(`  \x1b[31m${err} failed\x1b[0m\n`)
 		process.stderr.write("\n")
 	} finally {
-		pool.terminate()
+		pool?.terminate()
 	}
 })
 
