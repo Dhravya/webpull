@@ -43,10 +43,11 @@ webpull https://docs.python.org -o ./python-docs -m 100
 
 ## How it works
 
-1. **Discovers pages** via sitemap.xml, nav link extraction, or link crawling
+1. **Discovers pages** via sitemap.xml, nav link extraction, JS bundle route parsing, or link crawling
 2. **Fetches in parallel** using a worker pool sized to your CPU cores
-3. **Converts to markdown** using [Defuddle](https://github.com/nichochar/defuddle) for intelligent content extraction
-4. **Writes to disk** preserving the URL path structure with YAML frontmatter
+3. **Renders SPAs** with headless Chromium when JavaScript-rendered content is detected
+4. **Converts to markdown** using [Defuddle](https://github.com/nichochar/defuddle) for intelligent content extraction
+5. **Writes to disk** preserving the URL path structure with YAML frontmatter
 
 Each markdown file includes metadata:
 
@@ -60,6 +61,7 @@ url: "https://docs.example.com/getting-started"
 ## Requirements
 
 - [Bun](https://bun.sh) runtime
+- [Playwright](https://playwright.dev) Chromium (auto-used for SPAs; install with `npx playwright install chromium`)
 
 ## License
 

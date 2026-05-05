@@ -1,6 +1,6 @@
 {
 	"name": "webpull",
-	"version": "0.1.2",
+	"version": "0.1.3",
 	"description": "Pull any public docs site into local markdown files",
 	"module": "src/index.ts",
 	"type": "module",
@@ -18,6 +18,7 @@
 	"dependencies": {
 		"defuddle": "^0.18.1",
 		"effect": "^3.21.2",
-		"linkedom": "^0.18.12"
+		"linkedom": "^0.18.12",
+		"playwright": "^1.59.1"
 	}
 }

@@ -1,5 +1,9 @@
 import { Effect } from "effect"
 import { parseHTML } from "linkedom"
+import { isSPAShell } from "./detect"
+import { launchBrowser, renderPage } from "./renderer"
+import { extractJsBundleUrls, extractRoutesFromBundles } from "./routes"
+import { getHeaders } from "./ua"
 
 const IGNORED = /\.(png|jpg|jpeg|gif|svg|webp|ico|pdf|zip|tar|gz|mp4|mp3|woff2?|ttf|eot|css|js|json|xml|rss|atom)$/i
 
@@ -18,7 +22,9 @@ const NAV_SELECTORS = [
 
 const tryFetch = (url: string): Effect.Effect<{ text: string; url: string } | null> =>
 	Effect.tryPromise(() =>
-		fetch(url, { redirect: "follow" }).then(async (r) => (r.ok ? { text: await r.text(), url: r.url } : null)),
+		fetch(url, { redirect: "follow", headers: getHeaders() }).then(async (r) =>
+			r.ok ? { text: await r.text(), url: r.url } : null,
+		),
 	).pipe(Effect.catchAll(() => Effect.succeed(null)))
 
 // --- Sitemap ---
@@ -49,6 +55,8 @@ const sitemapFromRobots = (origin: string) =>
 	Effect.gen(function* () {
 		const r = yield* tryFetch(`${origin}/robots.txt`)
 		if (!r) return []
+		// Validate it is actually a robots.txt (not an SPA shell returning HTML)
+		if (r.text.includes("<!doctype") || r.text.includes("<html")) return []
 		const urls = (r.text.match(/^Sitemap:\s*(.+)$/gim) ?? []).map((l) => l.replace(/^Sitemap:\s*/i, "").trim())
 		if (!urls.length) return []
 		const results = yield* Effect.all(
@@ -160,12 +168,118 @@ const filterAndDedupe = (urls: string[], hosts: Set<string>, scope: string, max:
 	return out.slice(0, max)
 }
 
+// --- SPA Discovery ---
+
+const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts: Set<string>) =>
+	Effect.gen(function* () {
+		process.stderr.write("  Detected SPA (JavaScript-rendered site)\n")
+
+		// Check for hash-based routing (e.g. #/page/foo)
+		const isHashRouter =
+			base.hash.length > 1 ||
+			html.includes("HashRouter") ||
+			html.includes("createHashRouter") ||
+			html.includes("hash-router") ||
+			html.includes("#/page/")
+		if (isHashRouter) {
+			process.stderr.write("  Hash-based routing detected, using browser to discover pages...\n")
+			const fullUrl = base.origin + base.pathname + (base.hash || "")
+			const rendered = yield* Effect.tryPromise({
+				try: async () => {
+					await launchBrowser()
+					return await renderPage(fullUrl, { timeout: 20000 })
+				},
+				catch: () => new Error("Browser render failed"),
+			}).pipe(Effect.catchAll(() => Effect.succeed(null as { html: string; url: string } | null)))
+
+			if (rendered) {
+				// Extract hash links from rendered page
+				const hashLinks: string[] = []
+				const hrefMatches = rendered.html.matchAll(/href=["'](#[^"'\s]+)["']/gi)
+				for (const m of hrefMatches) {
+					if (m[1] && m[1].length > 1) {
+						hashLinks.push(base.origin + base.pathname + m[1])
+					}
+				}
+				const deduped = [...new Set(hashLinks)]
+				// Always include the originally requested URL
+				if (!deduped.includes(fullUrl)) deduped.unshift(fullUrl)
+				const unique = deduped.slice(0, max)
+				if (unique.length > 0) {
+					process.stderr.write(`  Found ${unique.length} hash-routed pages\n`)
+					return unique
+				}
+
+				// Also try regular nav extraction from rendered content
+				const nav = yield* extractNav(new URL(rendered.url), rendered.html)
+				if (nav.length > 1) {
+					process.stderr.write(`  Found ${nav.length} pages from rendered navigation\n`)
+					return nav.slice(0, max)
+				}
+			}
+
+			// Fallback: just return the original URL with hash
+			return [fullUrl]
+		}
+
+		// Strategy 1: Extract routes from JS bundles
+		const jsUrls = extractJsBundleUrls(html, base)
+		if (jsUrls.length > 0) {
+			process.stderr.write(`  Scanning ${jsUrls.length} JS bundle(s) for routes...\n`)
+			const routes = yield* Effect.tryPromise({
+				try: () => extractRoutesFromBundles(jsUrls, base, scope),
+				catch: () => new Error("Route extraction failed"),
+			}).pipe(Effect.catchAll(() => Effect.succeed([] as string[])))
+
+			if (routes.length > 0) {
+				const filtered = filterAndDedupe(routes, hosts, scope, max)
+				if (filtered.length > 0) {
+					process.stderr.write(`  Found ${filtered.length} pages from JS bundles\n`)
+					return filtered
+				}
+			}
+		}
+
+		// Strategy 2: Render the page with headless browser and extract nav links
+		process.stderr.write("  Launching headless browser for navigation extraction...\n")
+		const rendered = yield* Effect.tryPromise({
+			try: async () => {
+				await launchBrowser()
+				return await renderPage(base.href)
+			},
+			catch: () => new Error("Browser render failed"),
+		}).pipe(Effect.catchAll(() => Effect.succeed(null as { html: string; url: string } | null)))
+
+		if (rendered) {
+			const nav = yield* extractNav(base, rendered.html)
+			if (nav.length > 1) {
+				const filtered = filterAndDedupe(nav, hosts, scope, max)
+				if (filtered.length > 0) {
+					process.stderr.write(`  Found ${filtered.length} pages from rendered navigation\n`)
+					return filtered
+				}
+			}
+
+			// Strategy 3: Extract all links from rendered page
+			const links = extractLinks(rendered.html, base, new Set(), scope)
+			const filtered = filterAndDedupe(links, hosts, scope, max)
+			if (filtered.length > 0) {
+				process.stderr.write(`  Found ${filtered.length} pages from rendered links\n`)
+				return filtered
+			}
+		}
+
+		// If all else fails, return just the base URL
+		process.stderr.write("  Could not discover additional pages\n")
+		return [base.href]
+	})
+
 // --- Main ---
 
 export const discover = (baseUrl: string, max: number) =>
 	Effect.gen(function* () {
 		const res = yield* Effect.tryPromise({
-			try: () => fetch(baseUrl, { redirect: "follow" }),
+			try: () => fetch(baseUrl, { redirect: "follow", headers: getHeaders() }),
 			catch: () => new Error(`Failed to fetch ${baseUrl}`),
 		})
 		if (!res.ok) return yield* Effect.fail(new Error(`HTTP ${res.status}: ${baseUrl}`))
@@ -181,6 +295,14 @@ export const discover = (baseUrl: string, max: number) =>
 
 		const hosts = new Set([original.hostname, actual.hostname])
 		const scope = getScopePath(actual.pathname)
+
+		// --- SPA Detection ---
+		if (isSPAShell(html)) {
+			// Preserve hash fragment from original URL for hash-routed SPAs
+			const spaBase = new URL(actual.href)
+			if (original.hash && !spaBase.hash) spaBase.hash = original.hash
+			return yield* discoverSPA(spaBase, html, max, scope, hosts)
+		}
 
 		const origins = [...new Set([original.origin, actual.origin])]
 		const basePaths = [...new Set([actual.pathname.replace(/\/[^/]*$/, "/"), "/"])]

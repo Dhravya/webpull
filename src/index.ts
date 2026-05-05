@@ -3,8 +3,10 @@ import { cpus } from "node:os"
 import { resolve } from "node:path"
 import { Effect } from "effect"
 import { frontmatter } from "./convert"
+import { isSPAShell } from "./detect"
 import { discover } from "./discover"
 import { WorkerPool } from "./pool"
+import { closeBrowser } from "./renderer"
 import { createUI } from "./ui"
 import { write } from "./write"
 
@@ -59,8 +61,8 @@ const parseArgs = (args: string[]): Config => {
 const program = Effect.gen(function* () {
 	const config = parseArgs(process.argv.slice(2))
 	const t0 = performance.now()
-	const workerCount = Math.max(8, cpus().length * 2)
-	const pool = new WorkerPool(workerCount)
+	let workerCount = Math.max(8, cpus().length * 2)
+	let pool: WorkerPool | null = null
 
 	process.stderr.write(`\n  \x1b[1m⚡ webpull\x1b[0m \x1b[90m· discovering pages...\x1b[0m\n\n`)
 
@@ -70,6 +72,21 @@ const program = Effect.gen(function* () {
 			process.stderr.write("  No pages found.\n")
 			process.exit(1)
 		}
+
+		// Detect if we need browser rendering for content extraction
+		const sampleHtml = yield* Effect.tryPromise({
+			try: () => fetch(config.url, { redirect: "follow" }).then((r) => r.text()),
+			catch: () => new Error("Failed to detect SPA"),
+		}).pipe(Effect.catchAll(() => Effect.succeed("")))
+		const needsBrowser = isSPAShell(sampleHtml)
+		if (needsBrowser) {
+			// Limit concurrency to avoid spawning too many Chromium instances
+			workerCount = Math.min(workerCount, 4)
+		}
+
+		const activePool = new WorkerPool(workerCount)
+		if (needsBrowser) activePool.useBrowser = true
+		pool = activePool
 
 		const tDisc = performance.now()
 		const total = urls.length
@@ -91,7 +108,7 @@ const program = Effect.gen(function* () {
 		}
 
 		yield* Effect.tryPromise(() =>
-			pool.pullAll(
+			activePool.pullAll(
 				urls,
 				(idx) => {
 					const slot = nextSlot++ % workerCount
@@ -114,7 +131,12 @@ const program = Effect.gen(function* () {
 							markdown: frontmatter(title, finalUrl) + (result.content ?? ""),
 						}
 
-						let filepath = new URL(finalUrl).pathname
+						const parsedUrl = new URL(finalUrl)
+						let filepath = parsedUrl.pathname
+						// Handle hash-routed URLs (e.g. #/page/export -> page/export)
+						if (parsedUrl.hash && parsedUrl.hash.length > 1) {
+							filepath = parsedUrl.hash.replace(/^#\/?/, "/")
+						}
 						if (filepath.endsWith("/")) filepath += "index"
 						filepath = filepath.replace(/\.html?$/, "").replace(/^\//, "")
 						if (!filepath.endsWith(".md")) filepath += ".md"
@@ -141,11 +163,13 @@ const program = Effect.gen(function* () {
 		if (err) process.stderr.write(`  \x1b[31m${err} failed\x1b[0m\n`)
 		process.stderr.write("\n")
 	} finally {
-		pool.terminate()
+		pool?.terminate()
 	}
 })
 
-Effect.runPromise(program).catch((e) => {
-	console.error(e)
-	process.exit(1)
-})
+Effect.runPromise(program)
+	.catch((e) => {
+		console.error(e)
+		process.exit(1)
+	})
+	.finally(() => closeBrowser())
