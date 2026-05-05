@@ -151,12 +151,18 @@ const getScopePath = (pathname: string) => {
 	return segs.length <= 1 ? pathname : `/${segs.slice(0, -1).join("/")}/`
 }
 
-const filterAndDedupe = (urls: string[], hosts: Set<string>, scope: string, max: number) => {
+const normalizeHost = (url: URL, preferredHost: string) => {
+	const apex = (host: string) => host.replace(/^www\./, "")
+	if (apex(url.hostname) === apex(preferredHost)) url.hostname = preferredHost
+}
+
+const filterAndDedupe = (urls: string[], hosts: Set<string>, scope: string, max: number, preferredHost?: string) => {
 	const seen = new Set<string>()
 	const out: string[] = []
 	for (const raw of urls) {
 		try {
 			const u = new URL(raw)
+			if (preferredHost) normalizeHost(u, preferredHost)
 			if (!hosts.has(u.hostname) || !u.pathname.startsWith(scope) || IGNORED.test(u.pathname)) continue
 			u.hash = u.search = ""
 			if (!seen.has(u.pathname)) {
@@ -327,7 +333,7 @@ export const discover = (baseUrl: string, max: number) =>
 					hosts.add(new URL(u).hostname)
 				} catch {}
 			}
-			const filtered = filterAndDedupe(urls, hosts, scope, max)
+			const filtered = filterAndDedupe(urls, hosts, scope, max, actual.hostname)
 			if (filtered.length > best.length) best = filtered
 		}
 
@@ -339,7 +345,7 @@ export const discover = (baseUrl: string, max: number) =>
 		process.stderr.write("  No sitemap, extracting from navigation...\n")
 		const nav = yield* extractNav(actual, html)
 		if (nav.length > 5) {
-			const filtered = filterAndDedupe(nav, hosts, scope, max)
+			const filtered = filterAndDedupe(nav, hosts, scope, max, actual.hostname)
 			if (filtered.length > 0) {
 				process.stderr.write(`  Found ${filtered.length} pages from navigation\n`)
 				return filtered
