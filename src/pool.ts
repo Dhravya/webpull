@@ -30,6 +30,11 @@ export class WorkerPool {
 			let completed = 0
 			const total = urls.length
 
+			if (total === 0) {
+				resolve()
+				return
+			}
+
 			const dispatchNext = (worker: Worker) => {
 				if (dispatched >= total) return
 				const idx = dispatched++
