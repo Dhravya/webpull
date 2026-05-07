@@ -29,6 +29,7 @@ export class WorkerPool {
 	private readonly jobTimeoutMs: number
 	private readonly respectNoindex: boolean
 	private readonly userAgent: string | undefined
+	private _useBrowser = false
 
 	constructor(size: number, options: WorkerPoolOptions = {}) {
 		this.convertTimeoutMs = options.convertTimeoutMs ?? 0
@@ -38,6 +39,10 @@ export class WorkerPool {
 		this.respectNoindex = options.respectNoindex ?? false
 		this.userAgent = options.userAgent
 		this.workers = Array.from({ length: size }, () => new Worker(WORKER_PATH))
+	}
+
+	set useBrowser(val: boolean) {
+		this._useBrowser = val
 	}
 
 	pullAll(
@@ -118,6 +123,7 @@ export class WorkerPool {
 					headers: this.headers,
 					respectNoindex: this.respectNoindex,
 					timeoutMs: this.jobTimeoutMs,
+					useBrowser: this._useBrowser,
 					userAgent: this.userAgent,
 				})
 			}

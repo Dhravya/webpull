@@ -1,4 +1,4 @@
-// Suppress defuddle's internal error logging
+// Suppress defuddle's internal error logging.
 const _stderr = process.stderr.write.bind(process.stderr)
 process.stderr.write = (chunk: any, ...args: any[]) => {
 	if (
@@ -12,12 +12,15 @@ process.stderr.write = (chunk: any, ...args: any[]) => {
 
 import { Defuddle } from "defuddle/node"
 import { extractHtmlMetadata, fallbackMarkdown } from "./convert"
+import { isSPAShell } from "./detect"
 import { fetchText } from "./fetcher"
+import { isBrowserLaunched, launchBrowser, renderPage } from "./renderer"
 
 declare const self: Worker
 
 const MARKDOWN_SIGNAL = /^(#{1,6}\s|[-*]\s|\d+\.\s|```|>\s|\[.+\]\(.+\))/m
 const MARKDOWN_CONTENT_TYPES = ["text/markdown", "text/x-markdown", "application/x-markdown"]
+const DEFUDDLE_TIMEOUT = 5000
 
 const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
 	Promise.race([promise, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), ms))])
@@ -30,10 +33,11 @@ self.onmessage = async (
 		respectNoindex?: boolean
 		timeoutMs?: number
 		url: string
+		useBrowser?: boolean
 		userAgent?: string
 	}>,
 ) => {
-	const { convertTimeoutMs, delayMs, headers, respectNoindex, timeoutMs, url, userAgent } = e.data
+	const { convertTimeoutMs, delayMs, headers, respectNoindex, timeoutMs, url, useBrowser, userAgent } = e.data
 	try {
 		const res = await fetchText(url, { accept: "text/markdown", delayMs, headers, timeoutMs, userAgent })
 		if (!res.ok) {
@@ -41,8 +45,8 @@ self.onmessage = async (
 			return
 		}
 
-		const text = res.text
-		let finalUrl = res.url
+		let text = res.text
+		let finalUrl = url.includes("#") ? url : res.url
 		const ct = res.contentType
 		const status = res.status
 		const sourceUrl = url
@@ -56,9 +60,17 @@ self.onmessage = async (
 			return
 		}
 
+		if (useBrowser && isSPAShell(text)) {
+			try {
+				if (!isBrowserLaunched()) await launchBrowser()
+				const rendered = await renderPage(finalUrl, { timeout: 20000 })
+				if (rendered) text = rendered.html
+			} catch {}
+		}
+
 		const cleaned = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
 		const metadata = extractHtmlMetadata(cleaned, finalUrl)
-		if (metadata.canonicalUrl) finalUrl = metadata.canonicalUrl
+		if (metadata.canonicalUrl && !url.includes("#")) finalUrl = metadata.canonicalUrl
 		if (respectNoindex && metadata.noindex) {
 			self.postMessage({ ok: false, error: `Skipped noindex page: ${url}` })
 			return
@@ -67,8 +79,10 @@ self.onmessage = async (
 
 		try {
 			const defuddle = Defuddle(cleaned, finalUrl, { markdown: true })
-			const result =
-				convertTimeoutMs && convertTimeoutMs > 0 ? await withTimeout(defuddle, convertTimeoutMs) : await defuddle
+			const result = await withTimeout(
+				defuddle,
+				convertTimeoutMs && convertTimeoutMs > 0 ? convertTimeoutMs : DEFUDDLE_TIMEOUT,
+			)
 			self.postMessage({
 				ok: true,
 				url: finalUrl,

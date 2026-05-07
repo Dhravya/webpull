@@ -5,11 +5,13 @@ import { dirname, join } from "node:path"
 import { Effect } from "effect"
 import { CliError, helpText, parseArgs, readVersion } from "./cli"
 import { frontmatter, type Page } from "./convert"
+import { isSPAShell } from "./detect"
 import { discover } from "./discover"
 import { filterUrls } from "./filter"
 import { defaultManifestPath, manifestDiff, readManifest, writeManifest } from "./manifest"
 import { OutputPathAllocator } from "./path"
 import { WorkerPool } from "./pool"
+import { closeBrowser } from "./renderer"
 import { createUI } from "./ui"
 import { write } from "./write"
 
@@ -31,15 +33,8 @@ const program = Effect.gen(function* () {
 
 	const config = parsed
 	const t0 = performance.now()
-	const workerCount = config.concurrency
-	const pool = new WorkerPool(workerCount, {
-		convertTimeoutMs: config.convertTimeoutMs,
-		delayMs: config.delayMs,
-		headers: config.headers,
-		jobTimeoutMs: config.timeoutMs,
-		respectNoindex: config.respectNoindex,
-		userAgent: config.userAgent,
-	})
+	let workerCount = config.concurrency
+	let pool: WorkerPool | null = null
 	let interrupted = false
 	let resolveInterrupted: (() => void) | undefined
 	const interruptedPromise = new Promise<void>((resolve) => {
@@ -47,7 +42,7 @@ const program = Effect.gen(function* () {
 	})
 	const onSigint = () => {
 		interrupted = true
-		pool.terminate()
+		pool?.terminate()
 		process.stderr.write("\n  Interrupted. Stopping workers...\n")
 		resolveInterrupted?.()
 	}
@@ -71,6 +66,7 @@ const program = Effect.gen(function* () {
 			process.stderr.write("  No pages found.\n")
 			process.exit(1)
 		}
+
 		const manifestPath = config.manifestFile ?? defaultManifestPath(config.out)
 		const manifest = readManifest(manifestPath)
 		const outputPaths = new OutputPathAllocator()
@@ -90,6 +86,7 @@ const program = Effect.gen(function* () {
 			console.log(JSON.stringify(diff, null, 2))
 			return
 		}
+
 		const skipExisting = config.resume || config.changedOnly || !config.overwrite
 		const skipped = skipExisting
 			? planned
@@ -128,6 +125,24 @@ const program = Effect.gen(function* () {
 			return
 		}
 
+		const sampleHtml = yield* Effect.tryPromise({
+			try: () => fetch(config.url, { redirect: "follow" }).then((r) => r.text()),
+			catch: () => new Error("Failed to detect SPA"),
+		}).pipe(Effect.catchAll(() => Effect.succeed("")))
+		const needsBrowser = isSPAShell(sampleHtml)
+		if (needsBrowser) workerCount = Math.min(workerCount, 4)
+
+		const activePool = new WorkerPool(workerCount, {
+			convertTimeoutMs: config.convertTimeoutMs,
+			delayMs: config.delayMs,
+			headers: config.headers,
+			jobTimeoutMs: config.timeoutMs,
+			respectNoindex: config.respectNoindex,
+			userAgent: config.userAgent,
+		})
+		activePool.useBrowser = needsBrowser
+		pool = activePool
+
 		const tDisc = performance.now()
 		const total = pages.length
 		const ui = config.quiet ? { finish() {}, render() {} } : createUI(config.url, config.out, workerCount)
@@ -150,7 +165,7 @@ const program = Effect.gen(function* () {
 		}
 
 		yield* Effect.tryPromise(() => {
-			const pullPromise = pool.pullAll(
+			const pullPromise = activePool.pullAll(
 				pages.map((page) => page.url),
 				(idx, workerId) => {
 					workerMap.set(idx, workerId)
@@ -158,9 +173,8 @@ const program = Effect.gen(function* () {
 					tick()
 				},
 				(result, idx, workerId) => {
-					const slot = workerMap.get(idx) ?? 0
+					const slot = workerMap.get(idx) ?? workerId
 					workerStates[slot] = "idle"
-					workerStates[workerId] = "idle"
 					workerMap.delete(idx)
 
 					if (result.ok) {
@@ -302,16 +316,18 @@ const program = Effect.gen(function* () {
 		}
 	} finally {
 		process.off("SIGINT", onSigint)
-		pool.terminate()
+		pool?.terminate()
 	}
 })
 
-Effect.runPromise(program).catch((e) => {
-	if (e instanceof CliError) {
-		console.error(`Error: ${e.message}`)
-		console.error(helpText)
+Effect.runPromise(program)
+	.catch((e) => {
+		if (e instanceof CliError) {
+			console.error(`Error: ${e.message}`)
+			console.error(helpText)
+			process.exit(1)
+		}
+		console.error(e)
 		process.exit(1)
-	}
-	console.error(e)
-	process.exit(1)
-})
+	})
+	.finally(() => closeBrowser())

@@ -1,6 +1,10 @@
 import { Effect } from "effect"
 import { DOMParser, parseHTML } from "linkedom"
+import { isSPAShell } from "./detect"
 import { fetchText } from "./fetcher"
+import { launchBrowser, renderPage } from "./renderer"
+import { extractJsBundleUrls, extractRoutesFromBundles } from "./routes"
+import { getHeaders } from "./ua"
 
 const IGNORED = /\.(png|jpg|jpeg|gif|svg|webp|ico|pdf|zip|tar|gz|mp4|mp3|woff2?|ttf|eot|css|js|json|xml|rss|atom)$/i
 
@@ -15,8 +19,6 @@ const NAV_SELECTORS = [
 	'[role="navigation"] a[href]',
 ]
 
-// --- Core fetch ---
-
 interface DiscoverOptions {
 	delayMs?: number
 	headers?: Record<string, string>
@@ -26,17 +28,20 @@ interface DiscoverOptions {
 	userAgent?: string
 }
 
+const requestHeaders = (options: DiscoverOptions = {}) => {
+	const headers = { ...getHeaders(), ...options.headers }
+	if (options.userAgent) headers["User-Agent"] = options.userAgent
+	return headers
+}
+
 const tryFetch = (url: string, options: DiscoverOptions = {}): Effect.Effect<{ text: string; url: string } | null> =>
 	Effect.tryPromise(() =>
 		fetchText(url, {
 			delayMs: options.delayMs,
-			headers: options.headers,
+			headers: requestHeaders(options),
 			timeoutMs: options.timeoutMs,
-			userAgent: options.userAgent,
 		}).then((r) => (r.ok ? { text: r.text, url: r.url } : null)),
 	).pipe(Effect.catchAll(() => Effect.succeed(null)))
-
-// --- Sitemap ---
 
 export const parseLocs = (xml: string) => {
 	const document = new DOMParser().parseFromString(xml, "text/xml")
@@ -103,6 +108,7 @@ const sitemapFromRobots = (origin: string, options: DiscoverOptions = {}) =>
 	Effect.gen(function* () {
 		const r = yield* tryFetch(`${origin}/robots.txt`, options)
 		if (!r) return []
+		if (r.text.includes("<!doctype") || r.text.includes("<html")) return []
 		const urls = (r.text.match(/^Sitemap:\s*(.+)$/gim) ?? []).map((l) => l.replace(/^Sitemap:\s*/i, "").trim())
 		if (!urls.length) return []
 		const results = yield* Effect.all(
@@ -111,8 +117,6 @@ const sitemapFromRobots = (origin: string, options: DiscoverOptions = {}) =>
 		)
 		return results.flat()
 	})
-
-// --- Nav extraction ---
 
 const extractNav = (base: URL, html: string) =>
 	Effect.sync(() => {
@@ -134,8 +138,6 @@ const extractNav = (base: URL, html: string) =>
 		urls.add(base.href)
 		return [...urls]
 	})
-
-// --- Crawl ---
 
 export const extractLinks = (html: string, base: URL, visited: Set<string>, scope = "/") => {
 	const { document } = parseHTML(html)
@@ -195,8 +197,6 @@ const crawl = (base: URL, max: number, scope: string, options: DiscoverOptions =
 		return found
 	})
 
-// --- Scoping ---
-
 const getScopePath = (pathname: string) => {
 	if (pathname === "/") return "/"
 	if (/\.\w+$/.test(pathname)) return pathname.replace(/\/[^/]*$/, "/")
@@ -205,12 +205,18 @@ const getScopePath = (pathname: string) => {
 	return segs.length <= 1 ? pathname : `/${segs.slice(0, -1).join("/")}/`
 }
 
-const filterAndDedupe = (urls: string[], hosts: Set<string>, scope: string, max: number) => {
+const normalizeHost = (url: URL, preferredHost: string) => {
+	const apex = (host: string) => host.replace(/^www\./, "")
+	if (apex(url.hostname) === apex(preferredHost)) url.hostname = preferredHost
+}
+
+const filterAndDedupe = (urls: string[], hosts: Set<string>, scope: string, max: number, preferredHost?: string) => {
 	const seen = new Set<string>()
 	const out: string[] = []
 	for (const raw of urls) {
 		try {
 			const u = new URL(raw)
+			if (preferredHost) normalizeHost(u, preferredHost)
 			if (!hosts.has(u.hostname) || !u.pathname.startsWith(scope) || IGNORED.test(u.pathname)) continue
 			u.hash = u.search = ""
 			if (!seen.has(u.pathname)) {
@@ -222,7 +228,98 @@ const filterAndDedupe = (urls: string[], hosts: Set<string>, scope: string, max:
 	return out.slice(0, max)
 }
 
-// --- Main ---
+const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts: Set<string>) =>
+	Effect.gen(function* () {
+		process.stderr.write("  Detected SPA (JavaScript-rendered site)\n")
+
+		const isHashRouter =
+			base.hash.length > 1 ||
+			html.includes("HashRouter") ||
+			html.includes("createHashRouter") ||
+			html.includes("hash-router") ||
+			html.includes("#/page/")
+		if (isHashRouter) {
+			process.stderr.write("  Hash-based routing detected, using browser to discover pages...\n")
+			const fullUrl = base.origin + base.pathname + (base.hash || "")
+			const rendered = yield* Effect.tryPromise({
+				try: async () => {
+					await launchBrowser()
+					return await renderPage(fullUrl, { timeout: 20000 })
+				},
+				catch: () => new Error("Browser render failed"),
+			}).pipe(Effect.catchAll(() => Effect.succeed(null as { html: string; url: string } | null)))
+
+			if (rendered) {
+				const hashLinks: string[] = []
+				const hrefMatches = rendered.html.matchAll(/href=["'](#[^"'\s]+)["']/gi)
+				for (const m of hrefMatches) {
+					if (m[1] && m[1].length > 1) hashLinks.push(base.origin + base.pathname + m[1])
+				}
+				const deduped = [...new Set(hashLinks)]
+				if (!deduped.includes(fullUrl)) deduped.unshift(fullUrl)
+				const unique = deduped.slice(0, max)
+				if (unique.length > 0) {
+					process.stderr.write(`  Found ${unique.length} hash-routed pages\n`)
+					return unique
+				}
+
+				const nav = yield* extractNav(new URL(rendered.url), rendered.html)
+				if (nav.length > 1) {
+					process.stderr.write(`  Found ${nav.length} pages from rendered navigation\n`)
+					return nav.slice(0, max)
+				}
+			}
+
+			return [fullUrl]
+		}
+
+		const jsUrls = extractJsBundleUrls(html, base)
+		if (jsUrls.length > 0) {
+			process.stderr.write(`  Scanning ${jsUrls.length} JS bundle(s) for routes...\n`)
+			const routes = yield* Effect.tryPromise({
+				try: () => extractRoutesFromBundles(jsUrls, base, scope),
+				catch: () => new Error("Route extraction failed"),
+			}).pipe(Effect.catchAll(() => Effect.succeed([] as string[])))
+
+			if (routes.length > 0) {
+				const filtered = filterAndDedupe(routes, hosts, scope, max)
+				if (filtered.length > 0) {
+					process.stderr.write(`  Found ${filtered.length} pages from JS bundles\n`)
+					return filtered
+				}
+			}
+		}
+
+		process.stderr.write("  Launching headless browser for navigation extraction...\n")
+		const rendered = yield* Effect.tryPromise({
+			try: async () => {
+				await launchBrowser()
+				return await renderPage(base.href)
+			},
+			catch: () => new Error("Browser render failed"),
+		}).pipe(Effect.catchAll(() => Effect.succeed(null as { html: string; url: string } | null)))
+
+		if (rendered) {
+			const nav = yield* extractNav(base, rendered.html)
+			if (nav.length > 1) {
+				const filtered = filterAndDedupe(nav, hosts, scope, max)
+				if (filtered.length > 0) {
+					process.stderr.write(`  Found ${filtered.length} pages from rendered navigation\n`)
+					return filtered
+				}
+			}
+
+			const links = extractLinks(rendered.html, base, new Set(), scope)
+			const filtered = filterAndDedupe(links, hosts, scope, max)
+			if (filtered.length > 0) {
+				process.stderr.write(`  Found ${filtered.length} pages from rendered links\n`)
+				return filtered
+			}
+		}
+
+		process.stderr.write("  Could not discover additional pages\n")
+		return [base.href]
+	})
 
 export const discover = (baseUrl: string, max: number, options: DiscoverOptions = {}) =>
 	Effect.gen(function* () {
@@ -230,9 +327,8 @@ export const discover = (baseUrl: string, max: number, options: DiscoverOptions 
 			try: () =>
 				fetchText(baseUrl, {
 					delayMs: options.delayMs,
-					headers: options.headers,
+					headers: requestHeaders(options),
 					timeoutMs: options.timeoutMs,
-					userAgent: options.userAgent,
 				}),
 			catch: () => new Error(`Failed to fetch ${baseUrl}`),
 		})
@@ -246,6 +342,12 @@ export const discover = (baseUrl: string, max: number, options: DiscoverOptions 
 
 		const hosts = new Set([original.hostname, actual.hostname])
 		const scope = getScopePath(actual.pathname)
+
+		if (isSPAShell(html)) {
+			const spaBase = new URL(actual.href)
+			if (original.hash && !spaBase.hash) spaBase.hash = original.hash
+			return yield* discoverSPA(spaBase, html, max, scope, hosts)
+		}
 
 		const origins = [...new Set([original.origin, actual.origin])]
 		const basePaths = [...new Set([actual.pathname.replace(/\/[^/]*$/, "/"), "/"])]
@@ -277,7 +379,7 @@ export const discover = (baseUrl: string, max: number, options: DiscoverOptions 
 					hosts.add(new URL(u).hostname)
 				} catch {}
 			}
-			const filtered = filterAndDedupe(urls, hosts, scope, max)
+			const filtered = filterAndDedupe(urls, hosts, scope, max, actual.hostname)
 			if (filtered.length > best.length) best = filtered
 		}
 
@@ -289,7 +391,7 @@ export const discover = (baseUrl: string, max: number, options: DiscoverOptions 
 		process.stderr.write("  No sitemap, extracting from navigation...\n")
 		const nav = yield* extractNav(actual, html)
 		if (nav.length > 5) {
-			const filtered = filterAndDedupe(nav, hosts, scope, max)
+			const filtered = filterAndDedupe(nav, hosts, scope, max, actual.hostname)
 			if (filtered.length > 0) {
 				process.stderr.write(`  Found ${filtered.length} pages from navigation\n`)
 				return filtered

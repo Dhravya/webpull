@@ -37,11 +37,15 @@ describe("robots helpers", () => {
 describe("extractLinks", () => {
 	test("extracts same-host anchor hrefs and ignores script text", () => {
 		const html = `
-			<html>
+			<html lang="en">
+				<head><title>Links fixture</title></head>
 				<body>
-					<a href="/docs/a">A</a>
-					<a href="https://other.example/docs/b">B</a>
-					<script>const x = '<a href="/docs/from-script">bad</a>'</script>
+					<main>
+						<h1>Links fixture</h1>
+						<a href="/docs/a">A</a>
+						<a href="https://other.example/docs/b">B</a>
+						<script>const x = '<a href="/docs/from-script">bad</a>'</script>
+					</main>
 				</body>
 			</html>
 		`
@@ -51,12 +55,20 @@ describe("extractLinks", () => {
 
 	test("skips visited, hash-only, mailto, javascript, and ignored assets", () => {
 		const html = `
-			<a href="#top">Top</a>
-			<a href="mailto:test@example.com">Mail</a>
-			<a href="javascript:void(0)">JS</a>
-			<a href="/docs/seen">Seen</a>
-			<a href="/docs/logo.png">Logo</a>
-			<a href="/docs/new">New</a>
+			<html lang="en">
+				<head><title>Ignored links fixture</title></head>
+				<body>
+					<main>
+						<h1>Ignored links fixture</h1>
+						<a href="#top">Top</a>
+						<a href="mailto:test@example.com">Mail</a>
+						<a href="javascript:void(0)">JS</a>
+						<a href="/docs/seen">Seen</a>
+						<a href="/docs/logo.png">Logo</a>
+						<a href="/docs/new">New</a>
+					</main>
+				</body>
+			</html>
 		`
 
 		expect(

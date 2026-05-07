@@ -26,7 +26,7 @@ describe("frontmatter", () => {
 describe("fallbackMarkdown", () => {
 	test("preserves common block and inline structure", () => {
 		const result = fallbackMarkdown(`
-			<html>
+			<html lang="en">
 				<head><title>Guide</title></head>
 				<body>
 					<main>

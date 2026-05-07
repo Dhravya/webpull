@@ -17,6 +17,10 @@ describe("urlToOutputPath", () => {
 		expect(urlToOutputPath("https://example.com/docs/start?utm_source=x#intro")).toBe("docs/start.md")
 	})
 
+	test("maps hash-routed SPA URLs to content paths", () => {
+		expect(urlToOutputPath("https://example.com/#/docs/start")).toBe("docs/start.md")
+	})
+
 	test("keeps malformed percent-encoded paths crawl-safe", () => {
 		expect(urlToOutputPath("https://example.com/%E0%A4%A")).toBe("%E0%A4%A.md")
 	})

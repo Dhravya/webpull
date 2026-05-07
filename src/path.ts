@@ -4,9 +4,9 @@ export const urlToOutputPath = (url: string): string => {
 	const parsed = new URL(url)
 	let pathname: string
 	try {
-		pathname = decodeURIComponent(parsed.pathname)
+		pathname = decodeURIComponent(parsed.hash.startsWith("#/") ? parsed.hash.replace(/^#\/?/, "/") : parsed.pathname)
 	} catch {
-		pathname = parsed.pathname
+		pathname = parsed.hash.startsWith("#/") ? parsed.hash.replace(/^#\/?/, "/") : parsed.pathname
 	}
 
 	if (!pathname || pathname === "/") pathname = "/index"
