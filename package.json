@@ -4,15 +4,27 @@
 	"description": "Pull any public docs site into local markdown files",
 	"module": "src/index.ts",
 	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
 	"bin": {
 		"webpull": "bin/webpull"
+	},
+	"engines": {
+		"bun": ">=1.0.0"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check .",
+		"test": "bun test",
+		"build": "bun build ./src/index.ts --outdir ./dist --target bun --external playwright --external playwright-core",
+		"check": "bun run typecheck && bun run lint && bun run test",
+		"smoke": "bun run src/index.ts --help"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.13",
 		"@types/bun": "latest",
-		"@types/node": "^25.6.0"
-	},
-	"peerDependencies": {
+		"@types/node": "^25.6.0",
 		"typescript": "^5"
 	},
 	"dependencies": {

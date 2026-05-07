@@ -2,24 +2,14 @@ import { mkdir } from "node:fs/promises"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { Effect } from "effect"
 import type { Page } from "./convert"
+import { urlToOutputPath } from "./path"
 
-export const write = (page: Page, outDir: string) =>
+export const write = (page: Page, outDir: string, outputPath = urlToOutputPath(page.url)) =>
 	Effect.gen(function* () {
-		const parsed = new URL(page.url)
-		let p = parsed.pathname
-		// Handle hash-routed URLs (e.g. #/page/export -> /page/export)
-		if (parsed.hash && parsed.hash.length > 1) {
-			p = parsed.hash.replace(/^#\/?/, "/")
-		}
-		if (p.endsWith("/")) p += "index"
-		p = p.replace(/\.html?$/, "").replace(/^\//, "")
-		if (!p.endsWith(".md")) p += ".md"
-
-		const full = join(outDir, p)
-		// Prevent path traversal attacks from malicious hash fragments
+		const full = join(outDir, outputPath)
 		const rel = relative(resolve(outDir), resolve(full))
 		if (rel.startsWith("..") || isAbsolute(rel)) {
-			return yield* Effect.fail(new Error(`path escape: ${p}`))
+			return yield* Effect.fail(new Error(`path escape: ${outputPath}`))
 		}
 		yield* Effect.tryPromise({
 			try: () => mkdir(dirname(full), { recursive: true }),

@@ -1,6 +1,7 @@
 import { Effect } from "effect"
-import { parseHTML } from "linkedom"
+import { DOMParser, parseHTML } from "linkedom"
 import { isSPAShell } from "./detect"
+import { fetchText } from "./fetcher"
 import { launchBrowser, renderPage } from "./renderer"
 import { extractJsBundleUrls, extractRoutesFromBundles } from "./routes"
 import { getHeaders } from "./ua"
@@ -18,23 +19,75 @@ const NAV_SELECTORS = [
 	'[role="navigation"] a[href]',
 ]
 
-// --- Core fetch ---
+interface DiscoverOptions {
+	delayMs?: number
+	headers?: Record<string, string>
+	maxDepth?: number
+	respectRobots?: boolean
+	timeoutMs?: number
+	userAgent?: string
+}
 
-const tryFetch = (url: string): Effect.Effect<{ text: string; url: string } | null> =>
+const requestHeaders = (options: DiscoverOptions = {}) => {
+	const headers = { ...getHeaders(), ...options.headers }
+	if (options.userAgent) headers["User-Agent"] = options.userAgent
+	return headers
+}
+
+const tryFetch = (url: string, options: DiscoverOptions = {}): Effect.Effect<{ text: string; url: string } | null> =>
 	Effect.tryPromise(() =>
-		fetch(url, { redirect: "follow", headers: getHeaders() }).then(async (r) =>
-			r.ok ? { text: await r.text(), url: r.url } : null,
-		),
+		fetchText(url, {
+			delayMs: options.delayMs,
+			headers: requestHeaders(options),
+			timeoutMs: options.timeoutMs,
+		}).then((r) => (r.ok ? { text: r.text, url: r.url } : null)),
 	).pipe(Effect.catchAll(() => Effect.succeed(null)))
 
-// --- Sitemap ---
+export const parseLocs = (xml: string) => {
+	const document = new DOMParser().parseFromString(xml, "text/xml")
+	return [...document.querySelectorAll("loc")].map((loc) => loc.textContent.trim()).filter(Boolean)
+}
 
-const parseLocs = (xml: string) => [...xml.matchAll(/<loc>\s*(.*?)\s*<\/loc>/gi)].map((m) => m[1]!.trim())
+export interface RobotsRules {
+	crawlDelayMs?: number
+	disallow: string[]
+}
 
-const fetchSitemap = (url: string, depth = 0): Effect.Effect<string[], never, never> => {
+export const parseRobots = (text: string): RobotsRules => {
+	const rules: RobotsRules = { disallow: [] }
+	let applies = false
+
+	for (const rawLine of text.split(/\r?\n/)) {
+		const line = rawLine.replace(/#.*/, "").trim()
+		if (!line) continue
+		const separator = line.indexOf(":")
+		if (separator === -1) continue
+		const field = line.slice(0, separator).trim().toLowerCase()
+		const value = line.slice(separator + 1).trim()
+
+		if (field === "user-agent") {
+			applies = value === "*"
+		} else if (applies && field === "disallow" && value) {
+			rules.disallow.push(value)
+		} else if (applies && field === "crawl-delay") {
+			const seconds = Number(value)
+			if (Number.isFinite(seconds) && seconds >= 0) rules.crawlDelayMs = seconds * 1000
+		}
+	}
+
+	return rules
+}
+
+export const isAllowedByRobots = (url: string, rules?: RobotsRules) => {
+	if (!rules) return true
+	const pathname = new URL(url).pathname
+	return !rules.disallow.some((rule) => pathname.startsWith(rule))
+}
+
+const fetchSitemap = (url: string, depth = 0, options: DiscoverOptions = {}): Effect.Effect<string[], never, never> => {
 	if (depth > 3) return Effect.succeed([])
 	return Effect.gen(function* () {
-		const r = yield* tryFetch(url)
+		const r = yield* tryFetch(url, options)
 		if (!r?.text.includes("<")) return []
 
 		const locs = parseLocs(r.text)
@@ -42,7 +95,7 @@ const fetchSitemap = (url: string, depth = 0): Effect.Effect<string[], never, ne
 
 		if (isIndex) {
 			const nested = yield* Effect.all(
-				locs.map((u) => fetchSitemap(u, depth + 1)),
+				locs.map((u) => fetchSitemap(u, depth + 1, options)),
 				{ concurrency: "unbounded" },
 			)
 			return nested.flat()
@@ -51,22 +104,19 @@ const fetchSitemap = (url: string, depth = 0): Effect.Effect<string[], never, ne
 	})
 }
 
-const sitemapFromRobots = (origin: string) =>
+const sitemapFromRobots = (origin: string, options: DiscoverOptions = {}) =>
 	Effect.gen(function* () {
-		const r = yield* tryFetch(`${origin}/robots.txt`)
+		const r = yield* tryFetch(`${origin}/robots.txt`, options)
 		if (!r) return []
-		// Validate it is actually a robots.txt (not an SPA shell returning HTML)
 		if (r.text.includes("<!doctype") || r.text.includes("<html")) return []
 		const urls = (r.text.match(/^Sitemap:\s*(.+)$/gim) ?? []).map((l) => l.replace(/^Sitemap:\s*/i, "").trim())
 		if (!urls.length) return []
 		const results = yield* Effect.all(
-			urls.map((u) => fetchSitemap(u)),
+			urls.map((u) => fetchSitemap(u, 0, options)),
 			{ concurrency: "unbounded" },
 		)
 		return results.flat()
 	})
-
-// --- Nav extraction ---
 
 const extractNav = (base: URL, html: string) =>
 	Effect.sync(() => {
@@ -89,13 +139,14 @@ const extractNav = (base: URL, html: string) =>
 		return [...urls]
 	})
 
-// --- Crawl ---
-
-const extractLinks = (html: string, base: URL, visited: Set<string>, scope: string) => {
+export const extractLinks = (html: string, base: URL, visited: Set<string>, scope = "/") => {
+	const { document } = parseHTML(html)
 	const out: string[] = []
-	for (const m of html.matchAll(/href=["'](.*?)["']/gi)) {
+	for (const link of document.querySelectorAll("a[href]")) {
+		const href = link.getAttribute("href")
+		if (!href || href.startsWith("#") || href.startsWith("javascript:") || href.startsWith("mailto:")) continue
 		try {
-			const r = new URL(m[1]!, base)
+			const r = new URL(href, base)
 			r.hash = r.search = ""
 			if (
 				r.hostname === base.hostname &&
@@ -109,39 +160,42 @@ const extractLinks = (html: string, base: URL, visited: Set<string>, scope: stri
 	return [...new Set(out)]
 }
 
-const crawl = (base: URL, max: number, scope: string) =>
+const crawl = (base: URL, max: number, scope: string, options: DiscoverOptions = {}, robots?: RobotsRules) =>
 	Effect.gen(function* () {
 		const visited = new Set<string>()
-		const queue = [base.href]
+		const queue = [{ depth: 0, url: base.href }]
 		const found: string[] = []
 
 		while (queue.length > 0 && found.length < max) {
-			const batch = queue.splice(0, Math.min(20, max - found.length)).filter((u) => !visited.has(u))
-			for (const u of batch) visited.add(u)
+			const batch = queue
+				.splice(0, Math.min(20, max - found.length))
+				.filter((item) => !visited.has(item.url) && isAllowedByRobots(item.url, robots))
+			for (const item of batch) visited.add(item.url)
 
 			const results = yield* Effect.all(
-				batch.map((url) =>
-					tryFetch(url).pipe(
+				batch.map((item) =>
+					tryFetch(item.url, options).pipe(
 						Effect.map((r) => {
-							if (!r?.text.includes("</html")) return []
+							if (!r?.text.includes("</html")) return { depth: item.depth, links: [] }
 							found.push(r.url)
-							return extractLinks(r.text, base, visited, scope)
+							if (options.maxDepth !== undefined && item.depth >= options.maxDepth) {
+								return { depth: item.depth, links: [] }
+							}
+							return { depth: item.depth, links: extractLinks(r.text, base, visited, scope) }
 						}),
 					),
 				),
 				{ concurrency: 20 },
 			)
 
-			for (const links of results) {
+			for (const { depth, links } of results) {
 				for (const link of links) {
-					if (!visited.has(link) && found.length + queue.length < max) queue.push(link)
+					if (!visited.has(link) && found.length + queue.length < max) queue.push({ depth: depth + 1, url: link })
 				}
 			}
 		}
 		return found
 	})
-
-// --- Scoping ---
 
 const getScopePath = (pathname: string) => {
 	if (pathname === "/") return "/"
@@ -174,13 +228,10 @@ const filterAndDedupe = (urls: string[], hosts: Set<string>, scope: string, max:
 	return out.slice(0, max)
 }
 
-// --- SPA Discovery ---
-
 const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts: Set<string>) =>
 	Effect.gen(function* () {
 		process.stderr.write("  Detected SPA (JavaScript-rendered site)\n")
 
-		// Check for hash-based routing (e.g. #/page/foo)
 		const isHashRouter =
 			base.hash.length > 1 ||
 			html.includes("HashRouter") ||
@@ -199,16 +250,12 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 			}).pipe(Effect.catchAll(() => Effect.succeed(null as { html: string; url: string } | null)))
 
 			if (rendered) {
-				// Extract hash links from rendered page
 				const hashLinks: string[] = []
 				const hrefMatches = rendered.html.matchAll(/href=["'](#[^"'\s]+)["']/gi)
 				for (const m of hrefMatches) {
-					if (m[1] && m[1].length > 1) {
-						hashLinks.push(base.origin + base.pathname + m[1])
-					}
+					if (m[1] && m[1].length > 1) hashLinks.push(base.origin + base.pathname + m[1])
 				}
 				const deduped = [...new Set(hashLinks)]
-				// Always include the originally requested URL
 				if (!deduped.includes(fullUrl)) deduped.unshift(fullUrl)
 				const unique = deduped.slice(0, max)
 				if (unique.length > 0) {
@@ -216,7 +263,6 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 					return unique
 				}
 
-				// Also try regular nav extraction from rendered content
 				const nav = yield* extractNav(new URL(rendered.url), rendered.html)
 				if (nav.length > 1) {
 					process.stderr.write(`  Found ${nav.length} pages from rendered navigation\n`)
@@ -224,11 +270,9 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 				}
 			}
 
-			// Fallback: just return the original URL with hash
 			return [fullUrl]
 		}
 
-		// Strategy 1: Extract routes from JS bundles
 		const jsUrls = extractJsBundleUrls(html, base)
 		if (jsUrls.length > 0) {
 			process.stderr.write(`  Scanning ${jsUrls.length} JS bundle(s) for routes...\n`)
@@ -246,7 +290,6 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 			}
 		}
 
-		// Strategy 2: Render the page with headless browser and extract nav links
 		process.stderr.write("  Launching headless browser for navigation extraction...\n")
 		const rendered = yield* Effect.tryPromise({
 			try: async () => {
@@ -266,7 +309,6 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 				}
 			}
 
-			// Strategy 3: Extract all links from rendered page
 			const links = extractLinks(rendered.html, base, new Set(), scope)
 			const filtered = filterAndDedupe(links, hosts, scope, max)
 			if (filtered.length > 0) {
@@ -275,36 +317,33 @@ const discoverSPA = (base: URL, html: string, max: number, scope: string, hosts:
 			}
 		}
 
-		// If all else fails, return just the base URL
 		process.stderr.write("  Could not discover additional pages\n")
 		return [base.href]
 	})
 
-// --- Main ---
-
-export const discover = (baseUrl: string, max: number) =>
+export const discover = (baseUrl: string, max: number, options: DiscoverOptions = {}) =>
 	Effect.gen(function* () {
 		const res = yield* Effect.tryPromise({
-			try: () => fetch(baseUrl, { redirect: "follow", headers: getHeaders() }),
+			try: () =>
+				fetchText(baseUrl, {
+					delayMs: options.delayMs,
+					headers: requestHeaders(options),
+					timeoutMs: options.timeoutMs,
+				}),
 			catch: () => new Error(`Failed to fetch ${baseUrl}`),
 		})
 		if (!res.ok) return yield* Effect.fail(new Error(`HTTP ${res.status}: ${baseUrl}`))
 
 		const actual = new URL(res.url)
 		const original = new URL(baseUrl)
-		const html = yield* Effect.tryPromise({
-			try: () => res.text(),
-			catch: () => new Error("Failed to read response"),
-		})
+		const html = res.text
 
 		if (actual.href !== original.href) process.stderr.write(`  Resolved to ${actual.href}\n`)
 
 		const hosts = new Set([original.hostname, actual.hostname])
 		const scope = getScopePath(actual.pathname)
 
-		// --- SPA Detection ---
 		if (isSPAShell(html)) {
-			// Preserve hash fragment from original URL for hash-routed SPAs
 			const spaBase = new URL(actual.href)
 			if (original.hash && !spaBase.hash) spaBase.hash = original.hash
 			return yield* discoverSPA(spaBase, html, max, scope, hosts)
@@ -312,13 +351,20 @@ export const discover = (baseUrl: string, max: number) =>
 
 		const origins = [...new Set([original.origin, actual.origin])]
 		const basePaths = [...new Set([actual.pathname.replace(/\/[^/]*$/, "/"), "/"])]
+		const robots = options.respectRobots
+			? parseRobots((yield* tryFetch(`${actual.origin}/robots.txt`, options))?.text ?? "")
+			: undefined
+		const crawlOptions = {
+			...options,
+			delayMs: Math.max(options.delayMs ?? 0, robots?.crawlDelayMs ?? 0),
+		}
 
 		const strategies: Effect.Effect<string[]>[] = []
 		for (const o of origins) {
-			strategies.push(sitemapFromRobots(o))
+			strategies.push(sitemapFromRobots(o, crawlOptions))
 			for (const bp of basePaths) {
 				for (const name of ["sitemap.xml", "sitemap_index.xml", "sitemap-0.xml"]) {
-					strategies.push(fetchSitemap(`${o}${bp}${name}`))
+					strategies.push(fetchSitemap(`${o}${bp}${name}`, 0, crawlOptions))
 				}
 			}
 		}
@@ -353,5 +399,5 @@ export const discover = (baseUrl: string, max: number) =>
 		}
 
 		process.stderr.write("  Falling back to link crawling...\n")
-		return yield* crawl(actual, max, scope)
+		return yield* crawl(actual, max, scope, crawlOptions, robots)
 	})

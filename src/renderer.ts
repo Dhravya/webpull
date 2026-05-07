@@ -1,11 +1,37 @@
-import { type Browser, type BrowserContext, chromium } from "playwright"
+type BrowserLike = {
+	close: () => Promise<void>
+	newContext: (options: { userAgent: string }) => Promise<BrowserContextLike>
+}
 
-let browser: Browser | null = null
-let context: BrowserContext | null = null
+type BrowserContextLike = {
+	close: () => Promise<void>
+	newPage: () => Promise<PageLike>
+}
+
+type PageLike = {
+	close: () => Promise<void>
+	content: () => Promise<string>
+	goto: (url: string, options: { timeout: number; waitUntil: "networkidle" }) => Promise<unknown>
+	url: () => string
+	waitForSelector: (selector: string, options: { timeout: number }) => Promise<unknown>
+	waitForTimeout: (timeout: number) => Promise<unknown>
+}
+
+let browser: BrowserLike | null = null
+let context: BrowserContextLike | null = null
+
+const loadChromium = async () => {
+	const importModule = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<unknown>
+	const playwright = (await importModule("playwright")) as {
+		chromium: { launch: (options: unknown) => Promise<BrowserLike> }
+	}
+	return playwright.chromium
+}
 
 export async function launchBrowser(): Promise<void> {
 	if (browser) return
 	try {
+		const chromium = await loadChromium()
 		browser = await chromium.launch({
 			headless: true,
 			args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
